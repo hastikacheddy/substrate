@@ -1,0 +1,52 @@
+# The Zundel cation (H5O2+), a proton shared between two water-like units, with REAL quantum chemistry:
+# Hartree-Fock / 6-31G* single-point energies from PySCF on a rigid-group (proton position x, O...O distance R) grid,
+# then the quantum route to a rate. PySCF has no Windows build, so on Windows it runs in WSL (scripts/setup_qc_env.sh).
+#
+# Energies are cached on disk by content, so the first run takes about a minute and later runs are instant.
+#
+# Why the quantum route and not the molecular one: on the *relaxed* surface the oxygens can approach and the proton is
+# shared, so there is no proton-transfer reaction and the molecular route correctly refuses. Freezing the O...O distance
+# at 2.8 angstrom is the right model when something (an enzyme active site) holds the donor and acceptor apart.
+#
+# Rigid scan: bond lengths and angles inside the two water-like units stay at their reference values.
+experiment:
+  id: EXP-QC-001
+  phenomenon: proton_transfer_ab_initio
+
+  system:
+    name: Zundel cation, HF/6-31G*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule:
+        charge: 1
+        spin: 0
+        donor: 0
+        acceptor: 1
+        proton: 2
+        donor_group: [3, 4]
+        acceptor_group: [5, 6]
+        atoms:                    # reference geometry, angstrom; donor, proton and acceptor on the z axis
+          - ["O", 0.0000000000, 0.0000000000, -1.2000000000]
+          - ["O", 0.0000000000, 0.0000000000, 1.2000000000]
+          - ["H", 0.0000000000, 0.0000000000, 0.0000000000]
+          - ["H", 0.4745466196, 0.7748757823, -1.5671144615]
+          - ["H", 0.4745466196, -0.7748757823, -1.5671144615]
+          - ["H", -0.7748757823, 0.4745466196, 1.5671144615]
+          - ["H", 0.7748757823, 0.4745466196, 1.5671144615]
+      method: {theory: hf, basis: 6-31g*, program: pyscf}
+      scan: {mirror_symmetric: true}      # the staggered ion is symmetric under donor/acceptor exchange; verified numerically, not assumed
+
+    parameters:
+      scan_distance:   {value: 2.8, unit: angstrom}    # the O...O distance the rigid slice is cut at
+      x_extent:        {value: 0.7, unit: angstrom}
+      distance_min:    {value: 2.3, unit: angstrom}
+      distance_max:    {value: 3.0, unit: angstrom}
+      n_x:             {value: 21, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 15.9949, unit: amu}
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure, quantum, reaction]

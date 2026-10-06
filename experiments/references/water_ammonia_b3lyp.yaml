@@ -1,0 +1,37 @@
+# Reference surface: water-ammonia cation [H2O...H...NH3]+ (O-H-N), dft:b3lyp/6-31g*.
+# The first ASYMMETRIC reference in the multi-molecule calibration study. Ammonia holds a proton far more tightly than water, so the
+# proton sits on the nitrogen; a metastable O-side (H3O+...NH3) well only appears above O...N ~ 2.9 A, 1.1-1.4 eV higher. The surface is
+# NOT symmetric under exchanging donor and acceptor, so the full proton range is computed (no mirror symmetry) and the model's
+# diabatic offset is a free parameter in the fit. "Barrier" in the comparisons is measured from the donor-side (oxygen) well.
+# Rigid-group scan, gas phase. Energies are cached on disk by content.
+experiment:
+  id: REF-water_ammonia_b3lyp
+  phenomenon: proton_transfer_reference
+
+  system:
+    name: Water-ammonia cation H2O-H-NH3+ (O-H-N), dft:b3lyp/6-31G*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: water_ammonia_cation}
+      method: {theory: dft:b3lyp, basis: 6-31g*, program: pyscf}
+      scan: {mirror_symmetric: false}       # asymmetric: every proton position is computed
+
+    parameters:
+      scan_distance:   {value: 3.1, unit: angstrom}
+      x_extent:        {value: 1.0, unit: angstrom}
+      distance_min:    {value: 2.4, unit: angstrom}
+      distance_max:    {value: 3.4, unit: angstrom}
+      n_x:             {value: 25, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 14.9329, unit: amu}     # twice the O...N reduced mass (the model engines use half of it)
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]
+
+  # The metastable O-side well and the barrier above it lie well above the minimum (the barrier top is 1.0-2.7 eV above it at HF, 1.1-2.1 at B3LYP,
+  # 1.2-2.3 at MP2), so the default 1.5 eV fit window would leave the barrier out of the fit and the model would never be asked to reproduce it.
+  # 2.5 eV reaches the barrier top at every distance except HF at 3.4 A (2.7 eV).
+  calibration: {window_ev: 2.5}

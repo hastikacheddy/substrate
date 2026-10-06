@@ -1,0 +1,35 @@
+# Proton transfer as the chemical step of an enzyme: electronic -> quantum -> reaction -> biophysical.
+# The chemistry (a proton hopping between two oxygens) comes from the scales below; the binding rate, unbinding
+# rate, release rate and substrate concentration are biophysical inputs, given as `context.*` parameters that
+# the pipeline carries across every scale untouched.
+#
+# The chemical step is the *isolated model reaction*: the enzyme's environment, which changes real barriers, is
+# not represented. All numbers are illustrative, not fitted to any enzyme.
+experiment:
+  id: EXP-PT-004
+  phenomenon: enzyme_proton_transfer
+
+  system:
+    name: O-H...O model in an enzyme cycle
+    scale: electronic_structure
+    kind: electronic.evb_two_state          # 1D electronic kind: the only route from here is through the quantum scale
+    parameters:
+      donor_acceptor_distance: {value: 2.50,  unit: angstrom, sigma: 0.01}
+      morse_depth:             {value: 4.6,   unit: eV}
+      morse_alpha:             {value: 2.2,   unit: 1/angstrom}
+      morse_r_eq:              {value: 0.96,  unit: angstrom}
+      coupling:                {value: 0.6,   unit: eV}
+      diabatic_offset:         {value: 0.05,  unit: eV}
+      particle_mass:           {value: 1.007276, unit: amu}
+      temperature:             {value: 300,   unit: K}
+
+      context.k_on:            {value: 1.0e7, unit: 1/(M s)}     # substrate association (well below the diffusion limit)
+      context.k_off:           {value: 1.0e3, unit: 1/s}         # K_d = 100 uM
+      context.k_release:       {value: 1.0e4, unit: 1/s,  sigma: 2.0e3}   # product release
+      context.substrate:       {value: 1.0e-4, unit: M}
+
+  propagation: [biophysical]
+
+  ensemble:
+    n_samples: 40
+    seed: 7

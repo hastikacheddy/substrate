@@ -1,0 +1,30 @@
+# Reference surface: Zundel cation H5O2+ (O-H-O), hf/6-31g*.
+# Part of the multi-molecule, multi-method calibration study (experiments/transfer_study.yaml). The molecule is named by template
+# (see substrate/molecules.py); the engine resolves it and records the full atom list on the solved system.
+# Rigid-group scan, gas phase. Energies are cached on disk by content.
+experiment:
+  id: REF-zundel_hf
+  phenomenon: proton_transfer_reference
+
+  system:
+    name: Zundel cation H5O2+ (O-H-O), hf/6-31g*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: zundel_cation}
+      method: {theory: hf, basis: 6-31g*, program: pyscf}
+      scan: {mirror_symmetric: true}      # all three ions are symmetric under exchanging donor and acceptor; verified numerically
+
+    parameters:
+      scan_distance:   {value: 2.8, unit: angstrom}
+      x_extent:        {value: 0.7, unit: angstrom}
+      distance_min:    {value: 2.3, unit: angstrom}
+      distance_max:    {value: 3.0, unit: angstrom}
+      n_x:             {value: 21, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 15.9949, unit: amu}
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]

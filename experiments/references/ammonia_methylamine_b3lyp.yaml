@@ -1,0 +1,39 @@
+# Reference surface: ammonia-methylamine cation [H3N...H...H2NCH3]+ (N-H-N), dft:b3lyp/6-31g*.
+# The third ASYMMETRIC reference in the multi-molecule calibration study, and the nitrogen counterpart of the methanol-water ion: the one-methyl
+# derivative of the symmetric ammonium dimer N2H7+ (as methanol-water is of the Zundel ion). Methylamine holds a proton only ~0.47 eV more tightly
+# than ammonia in the gas phase, a milder asymmetry than methanol-water (~0.65 eV) and water-ammonia (~1.7 eV). The proton prefers the methylamine
+# nitrogen; the ammonia-side (donor) well is the higher one, from N...N ~ 2.7 A.
+# The surface is NOT symmetric under exchanging donor and acceptor, so the full proton range is computed (no mirror symmetry) and the model's
+# diabatic offset is a free parameter in the fit. "Barrier" in the comparisons is measured from the donor-side (ammonia) well.
+# Rigid-group scan, gas phase. Energies are cached on disk by content.
+experiment:
+  id: REF-ammonia_methylamine_b3lyp
+  phenomenon: proton_transfer_reference
+
+  system:
+    name: Ammonia-methylamine cation H3N-H-NH2CH3+ (N-H-N), dft:b3lyp/6-31G*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: ammonia_methylamine_cation}
+      method: {theory: dft:b3lyp, basis: 6-31g*, program: pyscf}
+      scan: {mirror_symmetric: false}       # asymmetric: every proton position is computed
+
+    parameters:
+      scan_distance:   {value: 3.0, unit: angstrom}
+      x_extent:        {value: 0.9, unit: angstrom}
+      distance_min:    {value: 2.5, unit: angstrom}
+      distance_max:    {value: 3.4, unit: angstrom}
+      n_x:             {value: 23, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 14.0031, unit: amu}     # nitrogen (both heavy atoms are nitrogens)
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]
+
+  # The metastable ammonia-side well and the barrier above it lie up to 2.05 eV above the minimum at HF (barrier tops 0.38-2.05 eV), so the default
+  # 1.5 eV fit window would leave the barrier out of the fit. Rule used for every asymmetric reference: the smallest of 1.5, 2.0, 2.5 or 3.0 eV
+  # that reaches the barrier top at every double-well distance (here 2.5).
+  calibration: {window_ev: 2.5}

@@ -1,0 +1,30 @@
+# Reference surface: bifluoride FHF- (F-H-F), mp2/6-31+g*.
+# Part of the multi-molecule, multi-method calibration study (experiments/transfer_study.yaml). The molecule is named by template
+# (see substrate/molecules.py); the engine resolves it and records the full atom list on the solved system.
+# Rigid-group scan, gas phase. Energies are cached on disk by content.
+experiment:
+  id: REF-fhf_mp2
+  phenomenon: proton_transfer_reference
+
+  system:
+    name: bifluoride FHF- (F-H-F), mp2/6-31+g*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: bifluoride_anion}
+      method: {theory: mp2, basis: 6-31+g*, program: pyscf}
+      scan: {mirror_symmetric: true}      # all three ions are symmetric under exchanging donor and acceptor; verified numerically
+
+    parameters:
+      scan_distance:   {value: 2.7, unit: angstrom}
+      x_extent:        {value: 0.7, unit: angstrom}
+      distance_min:    {value: 2.1, unit: angstrom}
+      distance_max:    {value: 2.9, unit: angstrom}
+      n_x:             {value: 21, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 18.9984, unit: amu}
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]

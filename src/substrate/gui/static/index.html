@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>substrate</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">substrate<span>mission control</span></div>
+    <nav class="tabs" role="tablist" aria-label="views">
+      <button class="tab" role="tab" data-tab="run" aria-selected="true">Run</button>
+      <button class="tab" role="tab" data-tab="transfer" aria-selected="false">Transfer study</button>
+    </nav>
+    <div class="spacer"></div>
+    <span class="pill" id="status">connecting…</span>
+    <button class="icon-btn" id="theme" aria-label="toggle light and dark" title="toggle light / dark">◐</button>
+  </header>
+  <section class="view" id="run-view">
+    <aside class="side" id="run-side" aria-label="experiments"></aside>
+    <main class="main" id="run-main"><div class="empty">Choose an experiment on the left.</div></main>
+  </section>
+  <section class="view single hidden" id="transfer-view">
+    <main class="main" id="transfer-main"><div class="empty"><span class="spin"></span></div></main>
+  </section>
+</div>
+<script src="/static/charts.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

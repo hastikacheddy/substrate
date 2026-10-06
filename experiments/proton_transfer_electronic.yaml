@@ -1,0 +1,27 @@
+# Proton transfer starting one scale lower: electronic structure -> quantum -> reaction.
+# The potential-energy surface is COMPUTED (two-state valence-bond model, diagonalised at every proton
+# position) rather than hand-set. It is still a model Hamiltonian, not ab initio, and its parameters are
+# illustrative O-H...O values, not fitted to a specific molecule.
+experiment:
+  id: EXP-PT-002
+  phenomenon: proton_transfer
+
+  system:
+    name: O-H...O valence-bond model
+    scale: electronic_structure
+    kind: electronic.evb_two_state
+    parameters:
+      donor_acceptor_distance: {value: 2.50,  unit: angstrom, sigma: 0.01}   # heavy-atom geometry uncertainty
+      morse_depth:             {value: 4.6,   unit: eV}
+      morse_alpha:             {value: 2.2,   unit: 1/angstrom}
+      morse_r_eq:              {value: 0.96,  unit: angstrom}
+      coupling:                {value: 0.6,   unit: eV,       sigma: 0.03}    # method uncertainty
+      diabatic_offset:         {value: 0.05,  unit: eV}                       # product state sits 50 meV higher
+      particle_mass:           {value: 1.007276, unit: amu}                   # context: carried to the nuclear problem
+      temperature:             {value: 300,   unit: K}
+
+  propagation: [electronic_structure, quantum, reaction]
+
+  ensemble:
+    n_samples: 60
+    seed: 7

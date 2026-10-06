@@ -1,0 +1,38 @@
+# Reference surface: methanol-water cation [H2O...H...HOCH3]+ (O-H-O), hf/6-31g*.
+# The second ASYMMETRIC reference in the multi-molecule calibration study, and a MILD one: methanol holds a proton only ~0.65 eV more tightly
+# than water (water-ammonia: ~1.7 eV), so this ion sits between the symmetric Zundel cation (the same O-H-O chemistry) and the strongly
+# asymmetric water-ammonia cation. The proton prefers the methanol oxygen; the water-side (donor) well is the higher one, from O...O ~ 2.6 A.
+# The surface is NOT symmetric under exchanging donor and acceptor, so the full proton range is computed (no mirror symmetry) and the model's
+# diabatic offset is a free parameter in the fit. "Barrier" in the comparisons is measured from the donor-side (water) well.
+# Rigid-group scan, gas phase. Energies are cached on disk by content.
+experiment:
+  id: REF-methanol_water_hf
+  phenomenon: proton_transfer_reference
+
+  system:
+    name: Methanol-water cation CH3OH-H-OH2+ (O-H-O), hf/6-31G*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: methanol_water_cation}
+      method: {theory: hf, basis: 6-31g*, program: pyscf}
+      scan: {mirror_symmetric: false}       # asymmetric: every proton position is computed
+
+    parameters:
+      scan_distance:   {value: 2.9, unit: angstrom}
+      x_extent:        {value: 0.9, unit: angstrom}
+      distance_min:    {value: 2.4, unit: angstrom}
+      distance_max:    {value: 3.2, unit: angstrom}
+      n_x:             {value: 23, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 15.9949, unit: amu}     # oxygen (both heavy atoms are oxygens)
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]
+
+  # The metastable water-side well and the barrier above it lie up to 2.2 eV above the minimum at HF (barrier tops 0.52-2.16 eV), so the default
+  # 1.5 eV fit window would leave the barrier out of the fit. Rule used for every asymmetric reference: the smallest of 1.5, 2.0, 2.5 or 3.0 eV
+  # that reaches the barrier top at every double-well distance (here 2.5).
+  calibration: {window_ev: 2.5}

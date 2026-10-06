@@ -1,0 +1,35 @@
+# Reference surface: chloride-hydrogen fluoride anion [Cl...H...F]- (Cl-H-F), hf/6-31+g*.
+# The fifth ASYMMETRIC reference in the multi-molecule calibration study, and the STRONG asymmetric anion: the counterpart of the mildly asymmetric
+# fluoride-methanol ion, as water-ammonia is of methanol-water and ammonia-methylamine. One fluoride of the symmetric bifluoride ion is swapped for
+# chloride. Fluoride is by far the stronger base (gas-phase acidities: HF ~1554, HCl ~1395 kJ/mol, a gap of ~1.65 eV), so the proton sits on the
+# fluorine; the chlorine-side (donor) well is the higher one and exists only from Cl...F ~ 3.2 A, 1.7-2.1 eV higher (a single well below that).
+# The surface is NOT symmetric under exchanging donor and acceptor, so the full proton range is computed (no mirror symmetry) and the model's
+# diabatic offset is a free parameter in the fit. "Barrier" in the comparisons is measured from the donor-side (chlorine) well.
+# A bare collinear triatomic: the rigid-group approximation is exact. Diffuse functions on every heavy atom (an anion). Energies are cached on
+# disk by content.
+experiment:
+  id: REF-chloride_hf_hf
+  phenomenon: proton_transfer_reference
+
+  system:
+    name: Chloride-hydrogen fluoride anion Cl-H-F- (Cl-H-F), hf/6-31+G*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: chloride_hf_anion}
+      method: {theory: hf, basis: 6-31+g*, program: pyscf}
+      scan: {mirror_symmetric: false}       # asymmetric: every proton position is computed
+
+    parameters:
+      scan_distance:   {value: 3.5, unit: angstrom}
+      x_extent:        {value: 1.3, unit: angstrom}
+      distance_min:    {value: 2.8, unit: angstrom}
+      distance_max:    {value: 3.9, unit: angstrom}
+      n_x:             {value: 27, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 24.62, unit: amu}       # twice the Cl...F reduced mass (the model engines use half of it)
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]

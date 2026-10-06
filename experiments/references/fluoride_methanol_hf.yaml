@@ -1,0 +1,40 @@
+# Reference surface: fluoride-methanol anion [F...H...OCH3]- (F-H-O), hf/6-31+g*.
+# The fourth ASYMMETRIC reference in the multi-molecule calibration study, and the first ANION: the nearest asymmetric neighbour of the symmetric
+# bifluoride ion that carries a methyl group (one fluoride swapped for methoxide; FHF- has no heavy-atom hydrogen to replace, so this is NOT a
+# pure one-substituent derivative: the heavy atom changes too). Methoxide is the stronger base (gas-phase acidities: HF ~1554, methanol ~1590
+# kJ/mol, each uncertain by ~8, a gap of ~0.4 eV; Hartree-Fock puts the well gap at 0.5-0.8 eV), so the proton prefers the oxygen; the fluorine-side
+# (donor) well is the higher one, from F...O ~ 2.55 A.
+# The surface is NOT symmetric under exchanging donor and acceptor, so the full proton range is computed (no mirror symmetry) and the model's
+# diabatic offset is a free parameter in the fit. "Barrier" in the comparisons is measured from the donor-side (fluorine) well.
+# Rigid-group scan, gas phase, diffuse functions on every heavy atom (an anion). Energies are cached on disk by content.
+experiment:
+  id: REF-fluoride_methanol_hf
+  phenomenon: proton_transfer_reference
+
+  system:
+    name: Fluoride-methanol anion F-H-OCH3- (F-H-O), hf/6-31+G*
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: fluoride_methanol_anion}
+      method: {theory: hf, basis: 6-31+g*, program: pyscf}
+      scan: {mirror_symmetric: false}       # asymmetric: every proton position is computed
+
+    parameters:
+      scan_distance:   {value: 2.8, unit: angstrom}
+      x_extent:        {value: 0.9, unit: angstrom}
+      distance_min:    {value: 2.3, unit: angstrom}
+      distance_max:    {value: 3.1, unit: angstrom}
+      n_x:             {value: 23, unit: "1"}
+      n_r:             {value: 11, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 17.3678, unit: amu}     # twice the O...F reduced mass (the model engines use half of it)
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]
+
+  # The metastable fluorine-side well and the barrier above it lie up to 2.27 eV above the minimum at HF (barrier tops 0.69-2.27 eV), so the default
+  # 1.5 eV fit window would leave the barrier out of the fit. Rule used for every asymmetric reference: the smallest of 1.5, 2.0, 2.5 or 3.0 eV
+  # that reaches the barrier top at every double-well distance (here 2.5).
+  calibration: {window_ev: 2.5}

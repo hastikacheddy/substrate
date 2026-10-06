@@ -1,0 +1,23 @@
+# Proton transfer in a model 1D double well, propagated quantum -> reaction.
+# Toy parameters in a physically sensible range (O-H...O-like separation, ~0.5 eV barrier).
+# They are NOT fitted to any real molecule; the PES is an input, not an ab initio result.
+experiment:
+  id: EXP-PT-001
+  phenomenon: proton_transfer
+
+  system:
+    name: proton double well
+    scale: quantum
+    kind: quantum.double_well_1d
+    parameters:
+      mass:             {value: 1.007276, unit: amu}
+      barrier_height:   {value: 0.50,     unit: eV,       sigma: 0.02}   # PES uncertainty, e.g. method error
+      half_separation:  {value: 0.40,     unit: angstrom}
+      reaction_energy:  {value: 0.05,     unit: eV}                      # product well sits 50 meV above reactant
+      temperature:      {value: 300,      unit: K}
+
+  propagation: [quantum, reaction]
+
+  ensemble:
+    n_samples: 100
+    seed: 7

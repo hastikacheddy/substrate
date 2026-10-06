@@ -1,0 +1,34 @@
+# Proton transfer through the molecular scale: electronic structure -> molecular -> reaction.
+# The heavy-atom (O...O) distance is a coordinate here, so the barrier is the relaxed one, and the rate is
+# classical transition-state theory (no tunnelling). Compare with the quantum route, which freezes the O...O
+# distance but includes tunnelling: they make different approximations and must not be divided to get a
+# "tunnelling factor".
+# Parameters are illustrative, not fitted; the surface is a valence-bond model, not ab initio.
+experiment:
+  id: EXP-PT-003
+  phenomenon: proton_transfer
+
+  system:
+    name: O-H...O flexible valence-bond model
+    scale: electronic_structure
+    kind: electronic.evb_two_state_2d
+    parameters:
+      morse_depth:        {value: 4.6,  unit: eV}
+      morse_alpha:        {value: 2.2,  unit: 1/angstrom}
+      morse_r_eq:         {value: 0.96, unit: angstrom}
+      coupling:           {value: 0.6,  unit: eV,         sigma: 0.03}     # electronic coupling at the reference distance
+      coupling_decay:     {value: 3.0,  unit: 1/angstrom}
+      reference_distance: {value: 2.5,  unit: angstrom}
+      oo_depth:           {value: 0.4,  unit: eV}                          # heavy-atom (O...O) Morse interaction
+      oo_alpha:           {value: 2.5,  unit: 1/angstrom}
+      oo_equilibrium:     {value: 2.7,  unit: angstrom,   sigma: 0.02}     # NB: the rate is exponentially sensitive to this
+      diabatic_offset:    {value: 0.05, unit: eV}
+      particle_mass:      {value: 1.007276, unit: amu}                     # the transferring proton
+      heavy_atom_mass:    {value: 15.9949,  unit: amu}                     # oxygen
+      temperature:        {value: 300,  unit: K}
+
+  propagation: [electronic_structure, molecular, reaction]
+
+  ensemble:
+    n_samples: 40
+    seed: 7
