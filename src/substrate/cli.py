@@ -69,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     cal.add_argument("--samples", type=int, default=100, help="ensemble size written into the calibrated experiment")
     cal.add_argument("--window", type=float, default=1.5, help="fit points up to this many eV above the surface minimum")
     cal.add_argument("--sigma", type=float, default=0.01, help="fit tolerance in eV, flat across the window")
+    cal.add_argument("--bonds", choices=("shared", "separate"), default="shared",
+                     help="separate: the acceptor bond gets its own Morse curve (for a pair whose two bonds differ; asymmetric surfaces only)")
     cal.add_argument("--no-validation", action="store_true", help="skip the leave-one-distance-out validation (faster)")
     tr = sub.add_parser("transfer", help="calibrate against several reference surfaces and test how far each calibration carries to the others")
     tr.add_argument("experiments", nargs="+", help="experiments whose electronic-structure systems each produce a reference 2D surface")
@@ -111,7 +113,7 @@ def _calibrate(args) -> int:
     try:
         exp = load_experiment(args.experiment)
         target = Pipeline(default_registry()).run(exp.system, [exp.system.scale]).final     # the reference surface
-        calibration = calibrate_evb_2d(target, FitSettings(window_ev=args.window, sigma_ev=args.sigma),
+        calibration = calibrate_evb_2d(target, FitSettings(window_ev=args.window, sigma_ev=args.sigma, bonds=args.bonds),
                                        cross_validate=not args.no_validation)
         print(calibration.summary())
         if args.json:
@@ -137,6 +139,8 @@ def _transfer(args) -> int:
     import json
     from pathlib import Path
 
+    from dataclasses import replace
+
     from .calibration import FitSettings
     from .transfer import fit_settings, format_report, make_reference, transfer_matrix
     try:
@@ -152,7 +156,8 @@ def _transfer(args) -> int:
                 for _, s in solved.values() if "surface_r" in s.observables]
         r_ref = args.reference_distance if args.reference_distance is not None else (float(np.mean(mids)) if mids else None)
         base = FitSettings(window_ev=args.window or 1.5, sigma_ev=args.sigma, reference_distance=r_ref)
-        references = {name: make_reference(name, exp.system, target, base if args.window else fit_settings(exp, base))
+        references = {name: make_reference(name, exp.system, target, replace(fit_settings(exp, base), window_ev=args.window) if args.window
+                                           else fit_settings(exp, base))
                       for name, (exp, target) in solved.items()}
         matrix = transfer_matrix(references, args.window)
         print(format_report(references, matrix))

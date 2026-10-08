@@ -377,3 +377,25 @@ def test_a_study_of_every_shipped_reference_is_allowed(app):
     names = [r["name"] for r in app.references_listing()]
     assert len(names) >= 15 and not any(r.get("invalid") for r in app.references_listing())
     assert app._check_names(names) == names and len(names) <= MAX_REFERENCES          # the page selects them all by default
+
+
+# -- a reference fitted with separate bonds ---------------------------------------------------------------------------------------------------------
+def test_a_reference_that_declares_separate_bonds_is_fitted_and_shown_with_its_acceptor_bond(tmp_path):
+    acceptor = ("diabatic_offset: {{value: -0.3, unit: eV}}\n      acceptor_morse_depth: {{value: 3.9, unit: eV}}\n"
+                "      acceptor_morse_alpha: {{value: 2.0, unit: 1/angstrom}}\n      acceptor_morse_r_eq: {{value: 1.05, unit: angstrom}}")
+    refs = tmp_path / "experiments" / "references"
+    refs.mkdir(parents=True)
+    (refs / "unlike.yaml").write_text(SYNTHETIC.format(name="U", coupling=0.6, hint="  calibration: {window_ev: 1.5, bonds: separate}" + chr(10))
+                                      .replace("diabatic_offset: {value: 0.0, unit: eV}", acceptor.replace("{{", "{").replace("}}", "}")))
+    (refs / "like.yaml").write_text(SYNTHETIC.format(name="L", coupling=0.6, hint=""))
+    app = App(tmp_path, cache_dir=tmp_path / "cache")
+    payload = app.run_transfer(["unlike", "like"])
+    unlike, like = payload["refs"]
+    assert unlike["calibration"]["parameters"]["acceptor_morse_r_eq"] == pytest.approx(1.05, rel=2e-3) and unlike["calibration"]["pinned"] == {}
+    assert (unlike["calibration"]["bonds"], like["calibration"]["bonds"]) == ("separate", "shared")
+    assert "acceptor_morse_r_eq" not in like["calibration"]["parameters"] and payload["matrix"]["rmse"][0][0] < 1e-4        # exact recovery of the unlike one
+    assert payload["matrix"]["rmse"][1][0] > 0.05                                                       # the shared-bond reference does not reproduce it
+    curve = app.run_learning(["unlike", "like"], "unlike", "like", [0.3], [3, 6])
+    assert curve["scratch"][-1]["rmse"] < 1e-3 and set(curve["priors"]) == {"0.3"}                      # the learning curve fits the target's own bond model
+    assert curve["floor"] < 1e-3                                                                        # (a shared-bond fit of this surface misses by 0.17 eV)
+    json.dumps(payload, allow_nan=False)

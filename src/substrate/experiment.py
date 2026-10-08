@@ -51,12 +51,15 @@ def parse_experiment(raw: dict) -> Experiment:
         ensemble = spec.get("ensemble", {})
         notes = {}
         if "calibration" in spec:                         # hints for fitting the model engines to this system's surface (see transfer.fit_settings)
+            from .calibration import BONDS                  # imported here: the calibration module pulls in the fitting stack
             hints = spec["calibration"]
             window = hints.get("window_ev") if isinstance(hints, dict) else None
             bad_window = window is not None and (isinstance(window, bool) or not isinstance(window, (int, float)) or not window > 0)
-            if not isinstance(hints, dict) or set(hints) - {"window_ev"} or bad_window:
-                raise ValidationError(f"experiment '{spec.get('id', system.name)}': `calibration` takes only a positive `window_ev` (got {hints})")
-            notes["calibration"] = {k: float(v) for k, v in hints.items()}
+            bad_bonds = isinstance(hints, dict) and "bonds" in hints and hints["bonds"] not in BONDS
+            if not isinstance(hints, dict) or set(hints) - {"window_ev", "bonds"} or bad_window or bad_bonds:
+                raise ValidationError(f"experiment '{spec.get('id', system.name)}': `calibration` takes only a positive `window_ev` "
+                                      f"and a `bonds` of {' or '.join(BONDS)} (got {hints})")
+            notes["calibration"] = {k: (v if k == "bonds" else float(v)) for k, v in hints.items()}
         return Experiment(
             id=spec.get("id", system.name),
             phenomenon=spec.get("phenomenon", ""),

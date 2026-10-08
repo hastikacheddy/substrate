@@ -97,7 +97,7 @@ def water_ammonia_cation(r_oh: float = 0.98, theta_o: float = 112.0, hoh: float 
     H-O-H = 104.5 degrees) and an NH4+-like ammonia unit (N-H = 1.02 angstrom, 110 degrees). `twist` (degrees) turns the ammonia unit about
     the axis relative to the water unit: the water hydrogens lie at azimuth +-58.4 degrees, the ammonia ones at twist, twist + 120 and
     twist + 240, so at the default 90 degrees the nearest pair is about 28 degrees apart (0 would give 58 degrees, the most staggered). The choice is
-    arbitrary and, being 2.6 angstrom apart along the axis, matters little (see the README for how little). Atom order: 0 donor O, 1 acceptor N,
+    arbitrary and, being 2.6 angstrom apart along the axis, matters little (measured: at most about 0.5 meV on the surface). Atom order: 0 donor O, 1 acceptor N,
     2 shared proton, 3-4 water hydrogens, 5-7 ammonia hydrogens."""
     atoms = [["O", 0.0, 0.0, -1.3], ["N", 0.0, 0.0, 1.3], ["H", 0.0, 0.0, 0.0]]
     atoms += _water_flank(-1.3, +1, 0.0, r_oh, theta_o, hoh)
@@ -231,7 +231,8 @@ def chloride_hf_anion() -> dict:
     hydrogen chloride ~1395 kJ/mol, a gap of about 1.65 eV, like water-ammonia's 1.7), so the proton sits on the fluorine; do NOT use
     `mirror_symmetric` with it. Donor = the chloride (the lower-proton-affinity side, so the reactant, proton on chlorine, is the higher-
     energy well), acceptor = the fluoride. Like the bifluoride, a bare collinear triatomic: no flanking groups, so the rigid-group
-    approximation is exact. Atom order: 0 donor Cl, 1 acceptor F, 2 shared proton."""
+    approximation is exact. The two bonds differ (Cl-H about 1.3 A, F-H about 0.93 A), which the shared-Morse model cannot place: its
+    calibration declares `bonds: separate` (see `FitSettings.bonds`). Atom order: 0 donor Cl, 1 acceptor F, 2 shared proton."""
     return {
         "atoms": [["Cl", 0.0, 0.0, -1.45], ["F", 0.0, 0.0, 1.45], ["H", 0.0, 0.0, 0.0]],
         "donor": 0, "acceptor": 1, "proton": 2, "donor_group": [], "acceptor_group": [],

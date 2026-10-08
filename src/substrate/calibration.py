@@ -56,7 +56,17 @@ EVB2D_PARAMETERS = (
     ParameterSpec("oo_alpha", "1/angstrom", 0.2, 8.0, 2.5),
     ParameterSpec("oo_equilibrium", "angstrom", 1.8, 4.0, 2.7),
 )
-OFFSET_SPEC = ParameterSpec("diabatic_offset", "eV", -5.0, 5.0, 0.0)
+#: The offset is a difference of diabatic well bottoms, which is NOT the difference of the adiabatic wells once the coupling is several eV.
+#: An earlier +-5 eV bound was sat on by the chloride-HF surface (the fit with its own bond curves, freed, lands at -5.4 eV, strictly inside
+#: -10 eV at the same rmse); every other asymmetric reference fits well inside either.
+OFFSET_SPEC = ParameterSpec("diabatic_offset", "eV", -10.0, 10.0, 0.0)
+#: The acceptor bond's own Morse curve ("separate" bonds), bounded like the donor's. Starts equal to the donor's: the fit begins at the shared model.
+ACCEPTOR_PARAMETERS = (
+    ParameterSpec("acceptor_morse_depth", "eV", 0.5, 15.0, 4.6),
+    ParameterSpec("acceptor_morse_alpha", "1/angstrom", 0.3, 6.0, 2.2),
+    ParameterSpec("acceptor_morse_r_eq", "angstrom", 0.7, 1.4, 0.96),
+)
+BONDS = ("shared", "separate")
 _BOUND_TOLERANCE = 1e-3          # a parameter within this fraction of its range of a bound counts as sitting on it
 _SYMMETRY_TOLERANCE = 1e-6       # eV: the reference is treated as symmetric (offset fixed at 0) below this
 
@@ -83,12 +93,19 @@ class FitSettings:
                                 # to another molecule or method. It enters as one extra residual (value - mean) / sigma per entry, so a
                                 # small sigma holds the parameter near the mean and a large one lets the data decide. The energy zero
                                 # is never given a prior.
+    bonds: str = "shared"       # "shared": both diabatic states use one Morse curve (a symmetric pair, or two alike bonds). "separate": the
+                                # acceptor bond gets a Morse curve of its own (three more parameters), for a pair whose two bonds differ, such
+                                # as Cl-H (1.27 A) and F-H (0.92 A). Only an asymmetric surface can be fitted with it: a symmetric one has equal
+                                # bonds by construction and the extra parameters would be undetermined.
 
 
 def evb2d_energy(x, r, p: dict[str, float], r_ref: float):
-    """The 2D valence-bond ground-state energy in closed form (the same surface the engine computes by diagonalisation)."""
-    va = morse(r / 2.0 + x, p["morse_depth"], p["morse_alpha"], p["morse_r_eq"])
-    vb = morse(r / 2.0 - x, p["morse_depth"], p["morse_alpha"], p["morse_r_eq"]) + p.get("diabatic_offset", 0.0)
+    """The 2D valence-bond ground-state energy in closed form (the same surface the engine computes by diagonalisation). The acceptor bond
+    uses `acceptor_morse_depth/alpha/r_eq` where `p` has them, else the donor's values."""
+    depth, alpha, r_eq = p["morse_depth"], p["morse_alpha"], p["morse_r_eq"]
+    va = morse(r / 2.0 + x, depth, alpha, r_eq)
+    vb = morse(r / 2.0 - x, p.get("acceptor_morse_depth", depth), p.get("acceptor_morse_alpha", alpha),
+               p.get("acceptor_morse_r_eq", r_eq)) + p.get("diabatic_offset", 0.0)
     delta = p["coupling"] * np.exp(-p["coupling_decay"] * (r - r_ref))
     return 0.5 * (va + vb) - np.sqrt((0.5 * (va - vb)) ** 2 + delta**2) + morse(r, p["oo_depth"], p["oo_alpha"], p["oo_equilibrium"])
 
@@ -132,12 +149,17 @@ class Calibration:
 
     # -- diagnostics ------------------------------------------------------------------------------------------------------
     @property
+    def bonds(self) -> str:
+        """"shared" or "separate": whether the acceptor bond has a Morse curve of its own (calibrations saved before this existed are shared)."""
+        return self.settings.get("bonds", "shared")
+
+    @property
     def poorly_determined(self) -> list[str]:
         """Free parameters whose fit uncertainty exceeds half their value."""
         return [n for n in self.covariance_names if self.sigma[n] > 0.5 * abs(self.parameters[n])]
 
     def summary(self) -> str:
-        lines = [f"Calibration of the 2D valence-bond model against '{self.target_name}'",
+        lines = [f"Calibration of the 2D valence-bond model against '{self.target_name}' ({self.bonds} bonds)",
                  f"  {self.n_points} reference points in the fitted window, {self.n_free} free parameters (incl. an energy zero), "
                  f"reduced chi2 {self.reduced_chi2:.2f}, {self.starts_agreeing}/{self.settings['starts']} starts reached the best fit", ""]
         lines.append(f"  {'parameter':<18}{'value':>10}  {'+/- (fit)':>10}   note")
@@ -180,7 +202,7 @@ class Calibration:
         r_ref = self.fixed["reference_distance"]
         if kind == EVB2D_KIND:
             params = {n: Quantity(p[n], spec.unit, self.sigma.get(n) if with_uncertainty else None, "calibration")
-                      for n, spec in ((s.name, s) for s in (*EVB2D_PARAMETERS, OFFSET_SPEC)) if n in p}
+                      for n, spec in ((s.name, s) for s in (*EVB2D_PARAMETERS, *ACCEPTOR_PARAMETERS, OFFSET_SPEC)) if n in p}
             params["reference_distance"] = Quantity(r_ref, "angstrom", source="calibration")
             params["x_extent"] = Quantity(self.grid["x_extent"], "angstrom", source="calibration")
             params["distance_min"] = Quantity(self.grid["distance_min"], "angstrom", source="calibration")
@@ -192,7 +214,7 @@ class Calibration:
             structure = {}
             if with_uncertainty and self.covariance_names:
                 structure["parameter_covariance"] = {"names": list(self.covariance_names), "matrix": self.covariance,
-                                                     "minimum": self._minimums(EVB2D_PARAMETERS)}
+                                                     "minimum": self._minimums((*EVB2D_PARAMETERS, *ACCEPTOR_PARAMETERS))}
             return ScientificSystem(name or f"{self.target_name} (calibrated model)", Scale.ELECTRONIC_STRUCTURE, EVB2D_KIND,
                                     parameters=params, structure=structure)
         if kind == EVB1D_KIND:
@@ -206,6 +228,7 @@ class Calibration:
                 "morse_r_eq": Quantity(p["morse_r_eq"], "angstrom", source="calibration"),
                 "coupling": Quantity(coupling, "eV", source="calibration"),
                 "diabatic_offset": Quantity(p.get("diabatic_offset", 0.0), "eV", source="calibration"),
+                **{n: Quantity(p[n], spec.unit, source="calibration") for n, spec in ((s.name, s) for s in ACCEPTOR_PARAMETERS) if n in p},
                 "scan_min_bond_length": Quantity(distance / 2.0 - self.grid["x_extent"], "angstrom", source="calibration"),
                 "n_scan": Quantity(241, "1"),
             }
@@ -260,11 +283,22 @@ def _is_symmetric(x: np.ndarray, e: np.ndarray) -> bool:
     return bool(np.allclose(x, -x[::-1], atol=1e-9) and np.abs(e - e[::-1]).max() < _SYMMETRY_TOLERANCE)
 
 
+def parameter_specs(settings: FitSettings, symmetric: bool) -> list[ParameterSpec]:
+    """The free parameters of a fit, in order: the donor's bond and the rest of the model, the acceptor's own bond if `settings.bonds` is
+    "separate", then the energy offset unless the surface is symmetric. Refuses a request the surface cannot support."""
+    if settings.bonds not in BONDS:
+        raise ValidationError(f"bonds must be one of {BONDS}, got {settings.bonds!r}")
+    if settings.bonds == "separate" and symmetric:
+        raise ValidationError("separate bonds need an asymmetric surface: a symmetric one has equal bonds by construction, "
+                              "so the acceptor's own curve would be undetermined")
+    return [*EVB2D_PARAMETERS, *(ACCEPTOR_PARAMETERS if settings.bonds == "separate" else ()), *([] if symmetric else [OFFSET_SPEC])]
+
+
 def _fit(x, r, e, settings: FitSettings, symmetric: bool, r_ref: float, columns=None, starts=None, initial=None):
     """Weighted least squares over the points of `e` within the window (optionally only some distance columns).
     `initial` (a full solution vector) replaces the first starting point, for warm-started refits.
     Returns (names, scipy result, mask, costs, (lower, upper))."""
-    specs = list(EVB2D_PARAMETERS) + ([] if symmetric else [OFFSET_SPEC])
+    specs = parameter_specs(settings, symmetric)
     names = [s.name for s in specs]
     override = {name: (lo, hi) for name, lo, hi in settings.bounds}
     unknown = set(override) - set(names)
@@ -404,7 +438,7 @@ def calibrate_evb_2d(target: ScientificSystem, settings: FitSettings | None = No
         starts_agreeing=int(sum(c <= best.cost * 1.01 + 1e-12 for c in costs)),
         rmse_ev=rmse, max_error_ev=worst, columns=_column_comparison(x, e, model - 0.0, r),
         settings={"window_ev": settings.window_ev, "sigma_ev": settings.sigma_ev, "starts": settings.starts, "seed": settings.seed,
-                  "symmetric_reference": symmetric, "prior": [list(entry) for entry in settings.prior]},
+                  "symmetric_reference": symmetric, "prior": [list(entry) for entry in settings.prior], "bonds": settings.bonds},
         grid={"x_extent": float(np.abs(x).max()), "distance_min": float(r.min()), "distance_max": float(r.max())},
         context=context,
     )

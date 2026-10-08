@@ -9,6 +9,11 @@ atoms a distance R apart, the electronic Hamiltonian is
 where A is the donor-bound ("reactant") diabatic state and B the acceptor-bound ("product") state. Diagonalising H
 gives the adiabatic ground state E0: the surface the nuclei move on. The eigenvectors give the electronic character.
 
+By default both bonds are the SAME Morse curve (morse_depth, morse_alpha, morse_r_eq), which suits a symmetric donor-acceptor pair or two
+alike bonds. When the two bonds differ (a chloride and a fluoride sharing a proton: Cl-H is 1.27 A, F-H 0.92 A) the acceptor bond takes a
+Morse curve of its own: any of acceptor_morse_depth, acceptor_morse_alpha, acceptor_morse_r_eq that is given replaces the donor's value for
+the acceptor side, and the rest stay shared.
+
 Two engines share that diagonalisation:
   electronic.evb_two_state     the heavy-atom distance R is fixed: a 1D scan along x
   electronic.evb_two_state_2d  R is a coordinate too: a 2D surface E(x, R), with a distance-dependent coupling
@@ -35,13 +40,22 @@ def morse(r: np.ndarray, depth: float, alpha: float, r_eq: float) -> np.ndarray:
     return depth * (1.0 - np.exp(-alpha * (r - r_eq))) ** 2
 
 
-def evb_adiabats(backend: SolverBackend, r_a, r_b, coupling, offset: float, depth: float, alpha: float, r_eq: float):
+def _acceptor_bond(system: ScientificSystem, depth: float, alpha: float, r_eq: float) -> tuple[float, float, float]:
+    """The acceptor-side Morse (depth, alpha, r_eq): each `acceptor_morse_*` parameter that is given, else the donor's value."""
+    return (system.param("acceptor_morse_depth", "eV", default=depth),
+            system.param("acceptor_morse_alpha", "1/angstrom", default=alpha),
+            system.param("acceptor_morse_r_eq", "angstrom", default=r_eq))
+
+
+def evb_adiabats(backend: SolverBackend, r_a, r_b, coupling, offset: float, depth: float, alpha: float, r_eq: float,
+                 acceptor: tuple[float, float, float] | None = None):
     """Diagonalise the 2x2 valence-bond Hamiltonian over any broadcastable set of geometries.
 
+    `acceptor` is the acceptor bond's Morse (depth, alpha, r_eq); None gives it the donor's (depth, alpha, r_eq), the shared model.
     Returns (E0, E1, |c_A|^2 of the ground state, V_A, V_B), each with the broadcast shape.
     """
     v_a = morse(np.asarray(r_a), depth, alpha, r_eq)
-    v_b = morse(np.asarray(r_b), depth, alpha, r_eq) + offset
+    v_b = morse(np.asarray(r_b), *(acceptor if acceptor is not None else (depth, alpha, r_eq))) + offset
     v_a, v_b, coupling = np.broadcast_arrays(v_a, v_b, coupling)
     h = np.zeros(v_a.shape + (2, 2))
     h[..., 0, 0], h[..., 1, 1], h[..., 0, 1], h[..., 1, 0] = v_a, v_b, coupling, coupling
@@ -76,7 +90,7 @@ class EVBProtonTransferEngine(Engine):
     kinds = (KIND,)
     approximations = (
         "model Hamiltonian, not ab initio: two valence-bond states (proton on donor, proton on acceptor) only",
-        "both diabatic states are Morse O-H potentials with shared parameters, apart from a constant offset",
+        "both diabatic states are Morse X-H potentials: the same curve apart from a constant offset, unless acceptor_morse_* parameters give the acceptor bond its own",
         "electronic coupling is constant along the scan (donor-acceptor distance is held fixed)",
         "rigid scan along the proton coordinate: the heavy atoms and any environment do not relax",
         "electronic ground state only; excited-state character is reported through the gap, not propagated",
@@ -90,10 +104,11 @@ class EVBProtonTransferEngine(Engine):
         r_eq = system.param("morse_r_eq", "angstrom")
         coupling = system.param("coupling", "eV")
         offset = system.param("diabatic_offset", "eV", default=0.0)
+        acceptor = _acceptor_bond(system, depth, alpha, r_eq)
         r_min = system.param("scan_min_bond_length", "angstrom", default=0.6)
         n_scan = int(system.param("n_scan", default=241))
 
-        if min(big_r, depth, alpha, r_eq, r_min) <= 0:
+        if min(big_r, depth, alpha, r_eq, r_min, *acceptor) <= 0:
             raise ValidationError(f"{system.name}: distances, Morse depth and Morse alpha must be positive")
         if coupling < 0:
             raise ValidationError(f"{system.name}: coupling must be non-negative (only |coupling| affects the surface)")
@@ -105,7 +120,7 @@ class EVBProtonTransferEngine(Engine):
 
         x = np.linspace(-x_max, x_max, n_scan)
         e0, e1, weight, v_a, v_b = evb_adiabats(
-            backend, big_r / 2.0 + x, big_r / 2.0 - x, coupling, offset, depth, alpha, r_eq
+            backend, big_r / 2.0 + x, big_r / 2.0 - x, coupling, offset, depth, alpha, r_eq, acceptor
         )
         return system.evolve(
             observables=_slice_observables(self.name, x, e0, e1, weight, v_a, v_b),
@@ -129,7 +144,7 @@ class EVBFlexibleProtonTransferEngine(Engine):
     kinds = (KIND_2D,)
     approximations = (
         "model Hamiltonian, not ab initio: two valence-bond states (proton on donor, proton on acceptor) only",
-        "both diabatic states are Morse O-H potentials with shared parameters, apart from a constant offset",
+        "both diabatic states are Morse X-H potentials: the same curve apart from a constant offset, unless acceptor_morse_* parameters give the acceptor bond its own",
         "collinear heavy atom - proton - heavy atom geometry; the surface is a function of (x, R) only",
         "coupling decays exponentially with R; the heavy-atom interaction is a Morse potential in R",
         "no environment or solvent; electronic ground state only (excited states enter through the gap)",
@@ -141,6 +156,7 @@ class EVBFlexibleProtonTransferEngine(Engine):
         alpha = system.param("morse_alpha", "1/angstrom")
         r_eq = system.param("morse_r_eq", "angstrom")
         offset = system.param("diabatic_offset", "eV", default=0.0)
+        acceptor = _acceptor_bond(system, depth, alpha, r_eq)
         coupling = system.param("coupling", "eV")
         decay = system.param("coupling_decay", "1/angstrom")
         r_ref = system.param("reference_distance", "angstrom")
@@ -154,13 +170,13 @@ class EVBFlexibleProtonTransferEngine(Engine):
         n_x = int(system.param("n_x", default=161))
         n_r = int(system.param("n_r", default=91))
 
-        if min(depth, alpha, r_eq, r_ref, oo_depth, oo_alpha, oo_eq, x_ext, d_min) <= 0:
+        if min(depth, alpha, r_eq, r_ref, oo_depth, oo_alpha, oo_eq, x_ext, d_min, *acceptor) <= 0:
             raise ValidationError(f"{system.name}: distances and Morse parameters must be positive")
         if coupling < 0 or decay < 0:
             raise ValidationError(f"{system.name}: coupling and coupling_decay must be non-negative")
-        if not d_min < d_max or not (d_min <= r_ref <= d_max and d_min <= r_scan <= d_max):
+        if not d_min < d_max or not d_min <= r_scan <= d_max:           # reference_distance only places the coupling: it may lie outside the grid
             raise ValidationError(
-                f"{system.name}: need distance_min < distance_max, with reference_distance and scan_distance inside them"
+                f"{system.name}: need distance_min < distance_max, with scan_distance inside them (reference_distance may lie anywhere)"
             )
         if n_x < 21 or n_r < 21:
             raise ValidationError(f"{system.name}: need n_x >= 21 and n_r >= 21")
@@ -171,13 +187,13 @@ class EVBFlexibleProtonTransferEngine(Engine):
         heavy = morse(r, oo_depth, oo_alpha, oo_eq)                           # heavy-atom interaction at each distance
         e0, e1, _, _, _ = evb_adiabats(
             backend, r[None, :] / 2.0 + x[:, None], r[None, :] / 2.0 - x[:, None],
-            delta[None, :], offset, depth, alpha, r_eq,
+            delta[None, :], offset, depth, alpha, r_eq, acceptor,
         )
         surface = e0 + heavy[None, :]
 
         s0, s1, weight, v_a, v_b = evb_adiabats(
             backend, r_scan / 2.0 + x, r_scan / 2.0 - x, coupling * np.exp(-decay * (r_scan - r_ref)),
-            offset, depth, alpha, r_eq,
+            offset, depth, alpha, r_eq, acceptor,
         )
         src = self.name
         shift = morse(r_scan, oo_depth, oo_alpha, oo_eq)                      # V_OO is a constant along the slice,

@@ -1,4 +1,4 @@
-# Reference surface: chloride-hydrogen fluoride anion [Cl...H...F]- (Cl-H-F), hf/6-31+g*.
+# Reference surface: chloride-hydrogen fluoride anion [Cl...H...F]- (Cl-H-F), mp2/6-31+g*.
 # The fifth ASYMMETRIC reference in the multi-molecule calibration study, and the STRONG asymmetric anion: the counterpart of the mildly asymmetric
 # fluoride-methanol ion, as water-ammonia is of methanol-water and ammonia-methylamine. One fluoride of the symmetric bifluoride ion is swapped for
 # chloride. Fluoride is by far the stronger base (gas-phase acidities: HF ~1554, HCl ~1395 kJ/mol, a gap of ~1.65 eV), so the proton sits on the
@@ -8,17 +8,17 @@
 # A bare collinear triatomic: the rigid-group approximation is exact. Diffuse functions on every heavy atom (an anion). Energies are cached on
 # disk by content.
 experiment:
-  id: REF-chloride_hf_hf
+  id: REF-chloride_hf_mp2
   phenomenon: proton_transfer_reference
 
   system:
-    name: Chloride-hydrogen fluoride anion Cl-H-F- (Cl-H-F), hf/6-31+G*
+    name: Chloride-hydrogen fluoride anion Cl-H-F- (Cl-H-F), mp2/6-31+G*
     scale: electronic_structure
     kind: electronic.qc_scan_2d
 
     structure:
       molecule: {template: chloride_hf_anion}
-      method: {theory: hf, basis: 6-31+g*, program: pyscf}
+      method: {theory: mp2, basis: 6-31+g*, program: pyscf}
       scan: {mirror_symmetric: false}       # asymmetric: every proton position is computed
 
     parameters:
@@ -34,10 +34,9 @@ experiment:
 
   propagation: [electronic_structure]
 
-  # The barrier tops lie up to 3.82 eV above the minimum at HF (0.02-3.82 eV at the eight double-well distances), beyond the 3.0 eV the
-  # other asymmetric references needed. The rule is unchanged but its list of candidates is extended: the smallest of 1.5, 2.0, 2.5, 3.0, 3.5
-  # or 4.0 eV that reaches the barrier top at every double-well distance (here 4.0).
-  # The two bonds differ (Cl-H wells at 1.25-1.37 A, F-H wells at 0.90-0.98 A), which a model with ONE Morse curve for both cannot place: that
-  # fit misses by 0.41 eV over this window, against 0.04-0.05 eV for the other asymmetric references. This reference therefore declares
-  # `bonds: separate`: the acceptor (fluorine) bond has a Morse curve of its own. See docs/findings.md.
+  # Fit window: set from the Hartree-Fock surface by the rule used for every asymmetric reference (the smallest of 1.5, 2.0, 2.5, 3.0, 3.5 or
+  # 4.0 eV that reaches the barrier top at every double-well distance; the HF tops reach 3.82 eV, so 4.0) and kept for the other two methods, so
+  # the molecule's three surfaces are fitted over the same range. (This method's own tops reach 3.02 eV.)
+  # The two bonds differ (Cl-H wells at 1.3-1.5 A, F-H wells at 0.9-1.0 A), which a model with ONE Morse curve for both cannot place, so this
+  # reference declares `bonds: separate`: the acceptor (fluorine) bond has a Morse curve of its own. See docs/findings.md.
   calibration: {window_ev: 4.0, bonds: separate}

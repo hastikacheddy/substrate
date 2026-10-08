@@ -22,8 +22,8 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from .calibration import (EVB2D_PARAMETERS, Calibration, FitSettings, _column_comparison, _fit, _is_symmetric, _reference,
-                          calibrate_evb_2d, evb2d_energy)
+from .calibration import (ACCEPTOR_PARAMETERS, EVB2D_PARAMETERS, Calibration, FitSettings, _column_comparison, _fit, _is_symmetric,
+                          _reference, calibrate_evb_2d, evb2d_energy, parameter_specs)
 from .errors import SubstrateError, ValidationError
 from .ir import Quantity, ScientificSystem
 
@@ -77,12 +77,14 @@ def make_reference(name: str, system: ScientificSystem, solved: ScientificSystem
 
 
 def fit_settings(experiment, base: FitSettings | None = None) -> FitSettings:
-    """`base` with the fit window the experiment file declares (`calibration: {window_ev: ...}`), if any. A surface whose barrier top lies
-    well above 1.5 eV (an asymmetric one: the metastable well and the barrier above it) must declare a window that includes it, because
-    the fit otherwise never sees the barrier it is meant to reproduce. The choice is in the file, so it is visible and recorded."""
+    """`base` with the fit window and the bond model the experiment file declares (`calibration: {window_ev: ..., bonds: ...}`), if any.
+    A surface whose barrier top lies well above 1.5 eV (an asymmetric one: the metastable well and the barrier above it) must declare a
+    window that includes it, because the fit otherwise never sees the barrier it is meant to reproduce. A pair whose two bonds differ
+    declares `bonds: separate`. The choices are in the file, so they are visible and recorded."""
     base = base or FitSettings()
-    window = experiment.notes.get("calibration", {}).get("window_ev")
-    return base if window is None else replace(base, window_ev=float(window))
+    hints = experiment.notes.get("calibration", {})
+    changes = {**({"window_ev": float(hints["window_ev"])} if "window_ev" in hints else {}), **({"bonds": hints["bonds"]} if "bonds" in hints else {})}
+    return replace(base, **changes)
 
 
 # =====================================================================================================================
@@ -174,8 +176,12 @@ def transfer_matrix(references: dict[str, Reference], window_ev: float | None = 
 # =====================================================================================================================
 def parameter_table(references: dict[str, Reference]) -> dict[str, dict[str, tuple[float | None, float | None]]]:
     """{parameter: {reference: (value, fit sigma or None)}}. A parameter pinned to a bound has no sigma. The energy offset is a row only
-    when some reference is asymmetric; for a symmetric one it is fixed at zero and its entry is (None, None)."""
+    when some reference is asymmetric; for a symmetric one it is fixed at zero and its entry is (None, None). The acceptor bond's own
+    Morse parameters are rows only when some reference was fitted with separate bonds; the others have (None, None) there, the acceptor
+    sharing their donor's values."""
     names = [s.name for s in EVB2D_PARAMETERS]
+    if any(s.name in ref.calibration.parameters for ref in references.values() for s in ACCEPTOR_PARAMETERS):
+        names += [s.name for s in ACCEPTOR_PARAMETERS]
     if any("diabatic_offset" in ref.calibration.parameters for ref in references.values()):
         names.append("diabatic_offset")
     return {n: {k: ((ref.calibration.parameters[n], ref.calibration.sigma.get(n)) if n in ref.calibration.parameters else (None, None))
@@ -298,7 +304,8 @@ def _training_subset(pool: list[int], k: int) -> list[int]:
 def prior_from(calibration: Calibration, relative_sigma: float, floor: float = 1e-3) -> tuple[tuple[str, float, float], ...]:
     """A Gaussian prior on every fitted parameter: the calibration's values, each with sigma = `relative_sigma` times its size.
     The same sigma is used whatever the data say, so it is a decision, not a result: sweep it (see `learning_curve`). An asymmetric
-    calibration's energy offset is among its parameters and gets a prior like the rest; a symmetric one has no offset to carry."""
+    calibration's energy offset, and a separate-bond calibration's acceptor-bond parameters, are among its parameters and get a prior
+    like the rest; a symmetric one has no offset to carry. `learning_curve` leaves out the entries its target has no parameter for."""
     return tuple((n, float(v), max(relative_sigma * abs(v), floor)) for n, v in calibration.parameters.items())
 
 
@@ -309,17 +316,17 @@ def learning_curve(target: Reference, counts=(1, 2, 3, 4, 6), *, source: Calibra
     With `source` and `relative_sigma` the fit is prior-regularised toward the source's values; without, it starts from scratch.
     The coupling is defined at the source's reference distance in both cases, so the two are fitted in the same variables.
     With a source, `counts` may include 0, the prior alone (scored with the best constant shift on the held-out points, which
-    flatters it: it is told the energy zero)."""
-    settings = settings or FitSettings()
+    flatters it: it is told the energy zero). The fit uses the target's own bond model (`target.calibration.bonds`), whatever `settings` says."""
+    settings = replace(settings or FitSettings(), bonds=target.calibration.bonds)         # the curve fits the target's own model form, bonds included
     r_ref = source.fixed["reference_distance"] if source is not None else (
         settings.reference_distance if settings.reference_distance is not None else float(0.5 * (target.r.min() + target.r.max())))
     pool, test = split_columns(len(target.r))
     if len(test) < 3:
         raise ValidationError("the target needs at least 6 heavy-atom distances for a learning curve")
     symmetric = target.symmetric
-    # a symmetric target has no free offset, so an asymmetric source's offset prior has nothing to act on and is left out
-    prior = () if source is None or relative_sigma is None else tuple(e for e in prior_from(source, relative_sigma)
-                                                                       if not (symmetric and e[0] == "diabatic_offset"))
+    # a prior entry the target has no parameter for (a symmetric target's offset, a shared-bond target's acceptor bond) has nothing to act on
+    free = {spec.name for spec in parameter_specs(settings, symmetric)}
+    prior = () if source is None or relative_sigma is None else tuple(e for e in prior_from(source, relative_sigma) if e[0] in free)
     fit_settings = settings if source is None or relative_sigma is None else FitSettings(
         **{**settings.__dict__, "prior": prior, "reference_distance": r_ref})
     Xt, Rt = np.meshgrid(target.x, target.r[test], indexing="ij")
@@ -396,17 +403,17 @@ def format_baselines(references: dict[str, Reference], window_ev: float | None =
 
 def format_own_fits(references: dict[str, Reference], matrix: dict[tuple[str, str], Prediction]) -> str:
     """One row per reference: how well its own calibration reproduces it, and the diagnostics that say where it does not."""
-    lines = [f"{'':<18}{'window':>7}{'rmse<=0.5':>10}{'<=1.0':>8}{'<=window':>9}{'worst':>8}{'barrier err':>13}{'wells':>7}{'pinned':>8}{'poor':>6}{'chi2':>7}{'starts':>8}"]
+    lines = [f"{'':<18}{'window':>7}{'rmse<=0.5':>10}{'<=1.0':>8}{'<=window':>9}{'worst':>8}{'barrier err':>13}{'wells':>7}{'pinned':>8}{'poor':>6}{'chi2':>7}{'starts':>8}{'bonds':>10}"]
     for name, ref in references.items():
         own, cal = matrix[(name, name)], ref.calibration
         starts = f"{cal.starts_agreeing}/{cal.settings['starts']}"
         lines.append(f"{name:<18}{own.window_ev:>7g}{own.rmse_ev['0.5']:>10.4f}{own.rmse_ev['1']:>8.4f}{own.rmse_window:>9.4f}{own.max_error_ev[f'{own.window_ev:g}']:>8.3f}"
                      f"{own.barrier_error_mean_abs:>13.3f}{own.wells_wrong:>7}{len(cal.pinned):>8}{len(cal.poorly_determined):>6}"
-                     f"{cal.reduced_chi2:>7.1f}{starts:>8}")
+                     f"{cal.reduced_chi2:>7.1f}{starts:>8}{cal.bonds:>10}")
     lines.append("(rmse and worst over the reference points in each window, eV, window = the fit window above the surface minimum; barrier err = mean "
                  "|model - reference| over distances with a double well, eV, barrier measured from the donor-side well;")
     lines.append(" wells = distances with the wrong number of wells; pinned = parameters on a bound; poor = parameters whose fit sigma "
-                 "exceeds half their value)")
+                 "exceeds half their value; bonds = whether the acceptor bond has a Morse curve of its own)")
     return "\n".join(lines)
 
 

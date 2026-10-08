@@ -28,7 +28,7 @@ from ..transfer import (
 from . import serialize as ser
 
 TRANSFER_REFERENCE_DISTANCE = 2.7        # where every transfer fit defines its coupling: inside every reference's distance range
-TRANSFER_VERSION = 3                     # bump to invalidate saved transfer results when the analysis changes
+TRANSFER_VERSION = 4                     # bump to invalidate saved transfer results when the analysis changes
 MAX_JOBS = 60
 MAX_REFERENCES = 24                       # a study compares every reference with every other, so its cost grows with the square
 
@@ -430,7 +430,7 @@ def transfer_payload(refs: dict[str, Reference], window_ev: float | None = None)
             "x": ser.rounded(ref.x), "r": ser.rounded(ref.r), "e": ser.rounded(ref.e, 4),
             "barrier": [c.barrier_reference for c in columns], "wells": [c.wells_reference for c in columns],
             "window": ref.window_ev if window_ev is None else window_ev, "baselines": baselines(ref, window_ev),
-            "calibration": {"parameters": cal.parameters, "sigma": cal.sigma, "pinned": cal.pinned, "poorly_determined": cal.poorly_determined,
+            "calibration": {"bonds": cal.bonds, "parameters": cal.parameters, "sigma": cal.sigma, "pinned": cal.pinned, "poorly_determined": cal.poorly_determined,
                             "shift": cal.shift_ev, "reduced_chi2": cal.reduced_chi2, "n_points": cal.n_points, "n_free": cal.n_free,
                             "starts_agreeing": cal.starts_agreeing, "starts": cal.settings["starts"], "rmse": cal.rmse_ev,
                             "max_error": cal.max_error_ev, "reference_distance": cal.fixed["reference_distance"]},

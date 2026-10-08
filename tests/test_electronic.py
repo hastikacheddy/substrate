@@ -1,13 +1,15 @@
+import math
+
 import numpy as np
 import pytest
 
 from substrate import ClassicalBackend, NoPathError, Quantity, Scale, ScientificSystem, ValidationError
-from substrate.engines.electronic import EVBProtonTransferEngine
+from substrate.engines.electronic import EVBFlexibleProtonTransferEngine, EVBProtonTransferEngine
 from substrate.engines.quantum import DoubleWellEngine, TabulatedPotentialEngine, double_well
 from substrate.pes import locate_wells, prominent_minima
 from substrate.translators.electronic_to_quantum import ElectronicToQuantum
 
-from conftest import DEUTERON, evb
+from conftest import DEUTERON, evb, evb2d
 from conftest import double_well as quartic_system
 
 
@@ -229,3 +231,23 @@ def test_electronic_example_experiment_runs_from_the_cli(capsys):
     assert main(["run", str(EXPERIMENTS / "proton_transfer_electronic.yaml"), "--samples", "6"]) == 0
     out = capsys.readouterr().out
     assert "electronic_structure" in out and "classical_barrier" in out and "k_f" in out and "n_minima" in out
+
+
+# -- the reference distance only places the coupling ------------------------------------------------------------------------------------
+BACKEND = ClassicalBackend()
+
+
+def test_the_reference_distance_may_lie_outside_the_scan_range_because_it_only_places_the_coupling():
+    """Delta(R) = c exp(-k (R - R_ref)): a different R_ref with c rescaled by exp(k (R_ref' - R_ref)) is the same coupling at every R, so the
+    surface and the slice are identical. R_ref = 2.1 A is outside the 2.3-3.0 A grid; the scan distance, which does cut the grid, must not be."""
+    grid = dict(distance_min=(2.3, "angstrom"), distance_max=(3.0, "angstrom"), scan_distance=(2.8, "angstrom"), n_x=(41, "1"), n_r=(21, "1"))
+    inside = EVBFlexibleProtonTransferEngine().solve(evb2d(reference_distance=2.5, coupling=0.6, **grid), BACKEND)
+    outside = EVBFlexibleProtonTransferEngine().solve(
+        evb2d(reference_distance=2.1, coupling=0.6 * math.exp(3.0 * (2.5 - 2.1)), **grid), BACKEND)
+    assert outside.obs("surface_energy") == pytest.approx(inside.obs("surface_energy"), abs=1e-9)
+    assert outside.obs("scan_energy") == pytest.approx(inside.obs("scan_energy"), abs=1e-9)
+    assert outside.obs("classical_barrier") == pytest.approx(inside.obs("classical_barrier"), abs=1e-9)
+    with pytest.raises(ValidationError, match="scan_distance inside them"):
+        EVBFlexibleProtonTransferEngine().solve(evb2d(reference_distance=2.5, **{**grid, "scan_distance": (3.4, "angstrom")}), BACKEND)
+    with pytest.raises(ValidationError, match="scan_distance inside them"):                      # no scan distance given: it defaults to the reference distance
+        EVBFlexibleProtonTransferEngine().solve(evb2d(reference_distance=2.1, **{k: v for k, v in grid.items() if k != "scan_distance"}), BACKEND)
