@@ -15,6 +15,7 @@ from ..backends import SolverBackend
 from ..base import Engine
 from ..errors import ValidationError
 from ..ir import Quantity, Scale, ScientificSystem
+from ..limits import require, whole_number
 
 KIND = "reaction.network"
 
@@ -52,7 +53,7 @@ class MassActionEngine(Engine):
 
         c0 = np.asarray(system.state["c"].value, dtype=float)
         t_end = system.param("t_end", "s")
-        n_time = int(system.param("n_time", default=200))
+        n_time = whole_number(system.name, "n_time", system.param("n_time", default=200), maximum="max_grid_points")
         t = np.linspace(0.0, t_end, n_time)
         c_t = backend.integrate_ode(rhs, c0, t)
 

@@ -15,21 +15,26 @@ Environment variables:
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.util
 import json
+import math
 import os
+import re
 import shlex
 import shutil
 import sqlite3
 import subprocess
 import sys
 from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
-from ..errors import QCError, QCUnavailableError
+from ..errors import QCError, QCUnavailableError, ValidationError
+from ..limits import require
 
 #: bump when the meaning of a cached energy changes (new convergence settings, a bug fix, ...)
 CACHE_VERSION = 1
@@ -40,7 +45,12 @@ CC_CHUNK = 6                                # the same for coupled cluster, whos
 def chunk_size(jobs: Sequence["QCJob"]) -> int:
     """Jobs per worker process: small when any job is coupled cluster or a geometry relaxation (about a minute or more each), so a chunk
     finishes inside the timeout and a failure loses little."""
-    return CC_CHUNK if any(job.theory.lower().startswith("ccsd") or job.task != "energy" for job in jobs) else CHUNK
+    return CC_CHUNK if any(_expensive(job) for job in jobs) else CHUNK
+
+
+def _expensive(job: "QCJob") -> bool:
+    """Coupled-cluster, relaxation and thermochemistry jobs cost minutes or more each; a single point costs seconds."""
+    return job.theory.lower().startswith("ccsd") or job.task != "energy"
 
 
 @dataclass(frozen=True)
@@ -67,6 +77,25 @@ class QCJob:
         if self.task != "energy":                    # added only when it differs, so every cached single point keeps its key
             canonical["task"] = self.task
         return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
+
+
+#: What a theory or a basis-set name may contain. PySCF reads a basis string as a file path if it is not a known name, so a path separator, a dot
+#: or a space has no business in one; none of the real names (6-31+G*, aug-cc-pV(T+d)Z, def2-SVP, b3lyp, wb97x-d) uses any of them.
+_THEORY_NAME = re.compile(r"[A-Za-z0-9_:,+*.()\-]{1,80}")
+_BASIS_NAME = re.compile(r"[A-Za-z0-9_,+*()\-]{1,40}")
+
+
+def check_request(jobs: Sequence["QCJob"]) -> None:
+    """Refuse a request that is too large before anything is looked up or computed (too many jobs, too many expensive ones, a job with too many
+    atoms; the limits are in `substrate.limits` and come from the environment), or whose theory or basis is not a name."""
+    for job in jobs:
+        if not _THEORY_NAME.fullmatch(job.theory):
+            raise ValidationError(f"theory {job.theory!r} is not a method name (letters, digits and : , + * . ( ) _ - only)")
+        if not _BASIS_NAME.fullmatch(job.basis):
+            raise ValidationError(f"basis {job.basis!r} is not a basis-set name (letters, digits and + * ( ) , _ - only: a file path is not accepted)")
+    require("max_qc_jobs", len(jobs), "quantum-chemistry jobs in one request")
+    require("max_expensive_qc_jobs", sum(1 for job in jobs if _expensive(job)), "coupled-cluster, relaxation and thermochemistry jobs in one request")
+    require("max_atoms", max((len(job.atoms) for job in jobs), default=0), "atoms in one quantum-chemistry job")
 
 
 @dataclass(frozen=True)
@@ -108,20 +137,61 @@ class QCProgram(ABC):
 
 
 # -- cache ------------------------------------------------------------------------------------------------------------
-class QCCache:
-    """Energies on disk (SQLite), keyed by QCJob.key. Safe to share between runs and processes."""
+def _digest(body: dict) -> str:
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
-    def __init__(self, path: str | Path | None = None):
+
+class QCCache:
+    """Energies on disk (SQLite), keyed by QCJob.key. Safe to share between runs and processes.
+
+    Each entry is sealed: the stored text holds the result, a short hash of the worker source that produced it, and a SHA-256 digest of both. An
+    entry whose digest does not match, whose text is not valid, or whose energy is not finite is never served (it counts in `rejected` and is
+    recomputed and overwritten). That catches damage, hand edits and results left behind by a different version of the code; it does not stop
+    someone who can write the file from sealing an entry again. Entries written before digests existed are served and reported as
+    "unverified"; with `strict` (or SUBSTRATE_QC_CACHE_STRICT=1) only entries written by the current worker are served.
+    """
+
+    def __init__(self, path: str | Path | None = None, strict: bool | None = None):
         if path is None:
             root = Path(os.environ.get("SUBSTRATE_CACHE_DIR") or Path.home() / ".cache" / "substrate")
             path = root / "qc.sqlite3"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.strict = os.environ.get("SUBSTRATE_QC_CACHE_STRICT", "") not in ("", "0") if strict is None else strict
+        self.rejected = 0                              # entries refused on reading, by this object
         with self._connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS energies (key TEXT PRIMARY KEY, payload TEXT NOT NULL)")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=60)
+
+    @staticmethod
+    def _seal(result: QCResult) -> str:
+        body = {"result": result.to_dict(), "worker": worker_digest()}
+        return json.dumps({**body, "sha256": _digest(body)})
+
+    @staticmethod
+    def _unseal(payload: str) -> tuple[QCResult | None, str, str | None]:
+        """(result, state, worker): state is "verified", "unverified" (written before digests existed) or "corrupt" (then result is None)."""
+        try:
+            obj = json.loads(payload)
+        except ValueError:
+            return None, "corrupt", None
+        if not isinstance(obj, dict):
+            return None, "corrupt", None
+        if "sha256" in obj:
+            claimed = obj.pop("sha256")
+            if claimed != _digest(obj):
+                return None, "corrupt", None
+            record, worker, state = obj.get("result"), obj.get("worker"), "verified"
+        else:
+            record, worker, state = obj, None, "unverified"
+        try:
+            result = QCResult.from_dict(record)
+            finite = math.isfinite(result.energy_hartree)
+        except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+            return None, "corrupt", None
+        return (result, state, worker) if finite else (None, "corrupt", None)
 
     def get_many(self, keys: Sequence[str]) -> dict[str, QCResult]:
         found: dict[str, QCResult] = {}
@@ -130,15 +200,45 @@ class QCCache:
                 batch = list(keys[start:start + 500])
                 rows = db.execute(
                     f"SELECT key, payload FROM energies WHERE key IN ({','.join('?' * len(batch))})", batch).fetchall()
-                found.update({k: QCResult.from_dict(json.loads(p)) for k, p in rows})
+                for key, payload in rows:
+                    result, state, worker = self._unseal(payload)
+                    if result is None or (self.strict and (state != "verified" or worker != worker_digest())):
+                        self.rejected += 1
+                    else:
+                        found[key] = result
         return found
 
     def put_many(self, items: dict[str, QCResult]) -> None:
         with self._connect() as db:
             db.executemany(
                 "INSERT OR REPLACE INTO energies (key, payload) VALUES (?, ?)",
-                [(k, json.dumps(r.to_dict())) for k, r in items.items()],
+                [(k, self._seal(r)) for k, r in items.items()],
             )
+
+    def audit(self) -> dict:
+        """Every entry checked: counts by state, and (for the readable ones) by the program version and the worker that wrote them."""
+        states, programs, workers = Counter(), Counter(), Counter()
+        with self._connect() as db:
+            for (payload,) in db.execute("SELECT payload FROM energies"):
+                result, state, worker = self._unseal(payload)
+                states[state] += 1
+                if result is not None:
+                    programs[result.program or "(unknown)"] += 1
+                    if worker:
+                        workers[worker] += 1
+        return {"total": sum(states.values()), "verified": states["verified"], "unverified": states["unverified"], "corrupt": states["corrupt"],
+                "by_program": dict(programs), "by_worker": dict(workers)}
+
+    def purge(self, *, corrupt: bool = False, unverified: bool = False, worker: str | None = None) -> int:
+        """Delete entries that fail their digest (`corrupt`), that predate digests (`unverified`), or that a given worker digest wrote. Returns how many."""
+        doomed = []
+        with self._connect() as db:
+            for key, payload in db.execute("SELECT key, payload FROM energies").fetchall():
+                result, state, entry_worker = self._unseal(payload)
+                if (corrupt and state == "corrupt") or (unverified and state == "unverified") or (worker is not None and entry_worker == worker):
+                    doomed.append((key,))
+            db.executemany("DELETE FROM energies WHERE key = ?", doomed)
+        return len(doomed)
 
     def __len__(self) -> int:
         with self._connect() as db:
@@ -148,6 +248,7 @@ class QCCache:
 def compute_cached(program: QCProgram, jobs: Sequence[QCJob], cache: QCCache | None = None) -> tuple[list[QCResult], int, int]:
     """Results for every job, computing only what the cache lacks. Returns (results, n_computed, n_cached).
     Duplicate jobs in the request are computed once."""
+    check_request(jobs)                                    # before the cache is even opened
     cache = cache if cache is not None else QCCache()      # NOT `cache or ...`: an empty cache is falsy (it has __len__)
     keys = [job.key(program.name) for job in jobs]
     have = cache.get_many(list(set(keys)))
@@ -167,6 +268,12 @@ def compute_cached(program: QCProgram, jobs: Sequence[QCJob], cache: QCCache | N
 
 # -- PySCF ------------------------------------------------------------------------------------------------------------
 _WORKER = Path(__file__).with_name("pyscf_worker.py")
+
+
+@functools.lru_cache(maxsize=1)
+def worker_digest() -> str:
+    """A short hash of the worker's source, stored with every cached result so that results from a different version of the worker can be found."""
+    return hashlib.sha256(_WORKER.read_bytes()).hexdigest()[:16]
 
 
 def _to_wsl_path(path: Path) -> str:

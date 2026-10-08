@@ -25,3 +25,8 @@ class QCError(SubstrateError):
 
 class QCUnavailableError(QCError):
     """No usable quantum-chemistry program was found."""
+
+
+class ResourceLimitError(SubstrateError):
+    """A request asks for more than the configured limits allow (a grid, an ensemble, a number of quantum-chemistry jobs). Deliberately not a
+    ValidationError: ensembles drop invalid draws, but an oversized request must stop the run, not be skipped."""

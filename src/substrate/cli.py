@@ -58,6 +58,15 @@ def report(result: RunResult) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="substrate")
     sub = parser.add_subparsers(dest="command", required=True)
+    cache = sub.add_parser("cache", help="audit or clean the quantum-chemistry energy cache")
+    cache_sub = cache.add_subparsers(dest="action", required=True)
+    cache_sub.add_parser("status", help="count the entries by state, program version and worker")
+    verify = cache_sub.add_parser("verify", help="check every entry's digest; exit 1 if any is damaged")
+    verify.add_argument("--delete", action="store_true", help="delete the damaged entries")
+    purge = cache_sub.add_parser("purge", help="delete entries by what is wrong with them or who wrote them")
+    purge.add_argument("--corrupt", action="store_true", help="entries that fail their digest or hold a non-finite energy")
+    purge.add_argument("--unverified", action="store_true", help="entries written before digests existed")
+    purge.add_argument("--worker", metavar="DIGEST", help="entries written by this worker version (see `cache status`)")
     run = sub.add_parser("run", help="run an experiment file")
     run.add_argument("experiment")
     run.add_argument("--samples", type=int, help="override the ensemble size")
@@ -93,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         return _calibrate(args)
     if args.command == "transfer":
         return _transfer(args)
+    if args.command == "cache":
+        return _cache(args)
     try:
         exp = load_experiment(args.experiment)
         n = exp.n_samples if args.samples is None else args.samples
@@ -143,7 +154,9 @@ def _transfer(args) -> int:
 
     from .calibration import FitSettings
     from .transfer import fit_settings, format_report, make_reference, transfer_matrix
+    from .limits import require
     try:
+        require("max_references", len(args.experiments), "references in one transfer study (its cost grows with the square)")
         pipeline = Pipeline(default_registry())
         solved = {}
         for path in args.experiments:
@@ -172,6 +185,31 @@ def _transfer(args) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     return 0
+
+
+def _cache(args) -> int:
+    from .qc import QCCache, worker_digest
+    try:
+        cache = QCCache()
+        if args.action == "purge":
+            if not (args.corrupt or args.unverified or args.worker):
+                raise SubstrateError("choose what to purge: --corrupt, --unverified or --worker DIGEST")
+            print(f"removed {cache.purge(corrupt=args.corrupt, unverified=args.unverified, worker=args.worker)} entries from {cache.path}")
+            return 0
+        if args.action == "verify" and args.delete:
+            print(f"removed {cache.purge(corrupt=True)} damaged entries")
+        report = cache.audit()
+        print(f"cache {cache.path}")
+        print(f"{report['total']} entries: {report['verified']} verified, {report['unverified']} unverified (written before digests existed), "
+              f"{report['corrupt']} corrupt")
+        for program, n in sorted(report["by_program"].items()):
+            print(f"  program {program}: {n}")
+        for digest, n in sorted(report["by_worker"].items()):
+            print(f"  worker {digest}: {n}" + ("  (current)" if digest == worker_digest() else ""))
+        return 1 if args.action == "verify" and report["corrupt"] else 0
+    except SubstrateError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

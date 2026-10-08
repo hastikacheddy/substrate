@@ -18,6 +18,7 @@ from ..backends import SolverBackend
 from ..base import Engine
 from ..errors import ValidationError
 from ..ir import Quantity, Scale, ScientificSystem
+from ..limits import require, whole_number
 from ..pes import MIN_PROMINENCE_EV, locate_wells, prominent_minima
 from ..units import H_EV_S, hbar2_over_2m
 
@@ -162,11 +163,12 @@ class _Schrodinger1D(Engine):
 
     @staticmethod
     def _grid_controls(system: ScientificSystem) -> tuple[int, int, float]:
-        n_grid = int(system.param("n_grid", default=1500))
-        n_levels = int(system.param("n_levels", default=8))
+        n_grid = whole_number(system.name, "n_grid", system.param("n_grid", default=1500), maximum="max_grid_points")
+        n_levels = whole_number(system.name, "n_levels", system.param("n_levels", default=8), maximum="max_grid_points")
         min_prominence = float(system.param("min_prominence", "eV", default=MIN_PROMINENCE_EV))
         if n_grid < 200 or n_levels < 2:
             raise ValidationError(f"{system.name}: need n_grid >= 200 and n_levels >= 2")
+        require("max_grid_points", n_grid * min(n_levels, n_grid), f"{system.name}: eigenvector entries (n_grid * n_levels)")
         return n_grid, n_levels, min_prominence
 
 

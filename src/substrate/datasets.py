@@ -18,10 +18,9 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-import yaml
-
 from .errors import ValidationError
 from .ir import Quantity
+from .safeload import load_yaml
 
 #: 1 eV in kJ/mol: N_A e / 1000, exact in the 2019 SI
 KJ_PER_MOL_PER_EV = 96.48533212331002
@@ -89,7 +88,7 @@ def load_reference_set(name: str = "nist_ion_energetics") -> ReferenceSet:
     path = _DATA / f"{name}.yaml"
     if not path.exists():
         raise ValidationError(f"no reference set '{name}' (have: {', '.join(sorted(p.stem for p in _DATA.glob('*.yaml')))})")
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = load_yaml(path.read_text(encoding="utf-8"), path.name)
     values = {}
     for entry in raw["values"]:
         if entry["species"] not in raw["species"]:

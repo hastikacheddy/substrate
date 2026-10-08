@@ -139,8 +139,9 @@ def test_the_slice_is_a_column_of_the_surface_when_scan_distance_is_a_grid_dista
     assert out.obs("calculations_run") == 21 * 15                       # the slice reused the grid's calculations
 
 
-def test_the_quantum_chemistry_engine_is_a_drop_in_for_the_model_engine(fake, pipeline):
+def test_the_quantum_chemistry_engine_is_a_drop_in_for_the_model_engine(fake, pipeline, monkeypatch):
     """With a program that returns the model's energies, the whole molecular route must give the model engine's answers."""
+    monkeypatch.setenv("SUBSTRATE_MAX_QC_JOBS", "20000")                    # the model engine's 161 x 91 grid is 14,813 jobs: far above the default limit
     system = zundel_system("fake", n_x=161, n_r=91, mirror=False, scan_distance=2.5, x_extent=0.65,
                            distance_min=2.2, distance_max=3.1)
     model = evb2d()

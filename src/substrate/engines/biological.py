@@ -25,6 +25,7 @@ from ..backends import SolverBackend
 from ..base import Engine
 from ..errors import ValidationError
 from ..ir import Quantity, Scale, ScientificSystem
+from ..limits import require, whole_number
 
 KIND = "biological.metabolic_network"
 
@@ -254,7 +255,7 @@ class MetabolicNetworkEngine(Engine):
             for rid, value in zip(ids, _flux_control(net, c_star, j_ref)):
                 obs[f"flux_control_{rid}"] = Quantity(value, "1", source=src)
 
-        n_time = int(system.param("n_time", default=200))
+        n_time = whole_number(system.name, "n_time", system.param("n_time", default=200), maximum="max_grid_points")
         t = np.linspace(0.0, 10.0 * settling, n_time)
         obs["time"] = Quantity(t, "s", source=src)
         try:

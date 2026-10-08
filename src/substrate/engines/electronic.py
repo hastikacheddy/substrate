@@ -30,6 +30,7 @@ from ..backends import SolverBackend
 from ..base import Engine
 from ..errors import ValidationError
 from ..ir import Quantity, Scale, ScientificSystem
+from ..limits import require, whole_number
 from ..pes import MIN_PROMINENCE_EV, locate_wells, prominent_minima
 
 KIND = "electronic.evb_two_state"
@@ -106,7 +107,7 @@ class EVBProtonTransferEngine(Engine):
         offset = system.param("diabatic_offset", "eV", default=0.0)
         acceptor = _acceptor_bond(system, depth, alpha, r_eq)
         r_min = system.param("scan_min_bond_length", "angstrom", default=0.6)
-        n_scan = int(system.param("n_scan", default=241))
+        n_scan = whole_number(system.name, "n_scan", system.param("n_scan", default=241), maximum="max_grid_points")
 
         if min(big_r, depth, alpha, r_eq, r_min, *acceptor) <= 0:
             raise ValidationError(f"{system.name}: distances, Morse depth and Morse alpha must be positive")
@@ -167,8 +168,9 @@ class EVBFlexibleProtonTransferEngine(Engine):
         x_ext = system.param("x_extent", "angstrom", default=0.65)
         d_min = system.param("distance_min", "angstrom", default=2.2)
         d_max = system.param("distance_max", "angstrom", default=3.1)
-        n_x = int(system.param("n_x", default=161))
-        n_r = int(system.param("n_r", default=91))
+        n_x = whole_number(system.name, "n_x", system.param("n_x", default=161), maximum="max_grid_points")
+        n_r = whole_number(system.name, "n_r", system.param("n_r", default=91), maximum="max_grid_points")
+        require("max_grid_points", n_x * n_r, f"{system.name}: grid points (n_x * n_r)")
 
         if min(depth, alpha, r_eq, r_ref, oo_depth, oo_alpha, oo_eq, x_ext, d_min, *acceptor) <= 0:
             raise ValidationError(f"{system.name}: distances and Morse parameters must be positive")

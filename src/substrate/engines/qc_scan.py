@@ -29,6 +29,7 @@ from ..backends import SolverBackend
 from ..base import Engine
 from ..errors import ValidationError
 from ..ir import Quantity, Scale, ScientificSystem
+from ..limits import require, whole_number
 from ..pes import MIN_PROMINENCE_EV, locate_wells, prominent_minima
 from ..molecules import resolve_molecule
 from ..qc import QCCache, QCJob, compute_cached, get_program
@@ -115,8 +116,8 @@ class QCScanEngine(Engine):
         d_min = system.param("distance_min", "angstrom", default=2.3)
         d_max = system.param("distance_max", "angstrom", default=3.0)
         r_scan = system.param("scan_distance", "angstrom")
-        n_x = int(system.param("n_x", default=29))
-        n_r = int(system.param("n_r", default=15))
+        n_x = whole_number(system.name, "n_x", system.param("n_x", default=29), maximum="max_grid_points")
+        n_r = whole_number(system.name, "n_r", system.param("n_r", default=15), maximum="max_grid_points")
         if min(x_ext, d_min) <= 0 or not d_min < d_max or not d_min <= r_scan <= d_max:
             raise ValidationError(
                 f"{system.name}: need positive x_extent and distance_min < distance_max, with scan_distance inside them")
@@ -131,6 +132,7 @@ class QCScanEngine(Engine):
         x = np.linspace(-x_ext, x_ext, n_x)
         r = np.linspace(d_min, d_max, n_r)
         compute_x = x[x >= -1e-12] if mirror else x                    # with mirror symmetry only x >= 0 is computed
+        require("max_qc_jobs", len(compute_x) * (n_r + 1) + 1, f"{system.name}: quantum-chemistry jobs in the scan")      # before any geometry is built
         jobs: list[QCJob] = []
         index: dict[tuple[str, int, int], int] = {}
         for i, xi in enumerate(compute_x):

@@ -16,6 +16,7 @@ import numpy as np
 
 from .backends import ClassicalBackend, SolverBackend
 from .base import Engine, Registry, Translator
+from .limits import whole_number
 from .errors import SubstrateError, ValidationError
 from .ir import CONTEXT_PREFIX, ProvenanceRecord, Scale, ScientificSystem
 from .workflow import Workflow
@@ -99,6 +100,7 @@ class Pipeline:
         seed: int = 0,
         experiment_id: str = "",
     ) -> RunResult:
+        n_samples = whole_number("pipeline", "n_samples", n_samples, minimum=0, maximum="max_ensemble")      # refused before anything runs
         steps = self.plan(root, propagation)
         trace = self._execute(root, steps)
         result = RunResult(experiment_id or root.name, root, trace, steps=steps)
