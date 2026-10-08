@@ -6,6 +6,7 @@ Only a classical CPU backend ships today. A Qiskit backend would implement
 """
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from typing import Callable
 
@@ -32,6 +33,11 @@ class SolverBackend(ABC):
         """Integrate dy/dt = rhs(t, y) from t_eval[0]; returns y sampled at t_eval, shape (len(t_eval), len(y0))."""
 
 
+#: SciPy's LSODA wraps a Fortran routine with global state: one integration per process at a time. Without this lock two threads (two browser
+#: tabs on the GUI server, say) fail with "Integrator `lsoda` can be used to solve only one problem at a time".
+_ODE_LOCK = threading.Lock()
+
+
 class ClassicalBackend(SolverBackend):
     name = "classical"
 
@@ -43,7 +49,8 @@ class ClassicalBackend(SolverBackend):
         return np.linalg.eigh(matrices)
 
     def integrate_ode(self, rhs, y0, t_eval):
-        sol = solve_ivp(rhs, (t_eval[0], t_eval[-1]), y0, method="LSODA", t_eval=t_eval, rtol=1e-9, atol=1e-12)
+        with _ODE_LOCK:
+            sol = solve_ivp(rhs, (t_eval[0], t_eval[-1]), y0, method="LSODA", t_eval=t_eval, rtol=1e-9, atol=1e-12)
         if not sol.success:
             raise RuntimeError(f"ODE integration failed: {sol.message}")
         return sol.y.T

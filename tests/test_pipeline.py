@@ -256,3 +256,34 @@ def test_ensemble_bands_survive_serialisation_and_change_identity(pipeline):
 def replace_band(q):
     from dataclasses import replace
     return replace(q, band=(q.band[0] * 1.5, q.band[1]))
+
+
+# -- the ODE solver is shared by every thread of a process (the GUI serves several requests at once) -----------------------------------------
+def test_concurrent_integrations_in_one_process_do_not_collide():
+    """SciPy's LSODA wraps a Fortran routine that can solve one problem at a time per process: two threads integrating at once fail with
+    "Integrator `lsoda` can be used to solve only one problem at a time". The GUI's server is multithreaded, so two browser tabs running an
+    experiment together hit it. The backend serialises the integration; each thread must still get the right answer for its own problem."""
+    import threading
+    import time
+
+    from substrate import ClassicalBackend
+    backend, results, errors = ClassicalBackend(), {}, []
+
+    def work(rate):
+        try:
+            def rhs(t, y):
+                time.sleep(0.0002)                                        # a slow right-hand side makes the threads overlap
+                return -rate * y
+            t = np.linspace(0.0, 1.0, 50)
+            results[rate] = backend.integrate_ode(rhs, np.array([1.0]), t)[:, 0]
+        except Exception as error:                                         # recorded: a failure in a thread must fail the test, not vanish
+            errors.append(repr(error))
+
+    threads = [threading.Thread(target=work, args=(rate,)) for rate in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    for rate, y in results.items():
+        assert y == pytest.approx(np.exp(-rate * np.linspace(0.0, 1.0, 50)), abs=1e-7), rate          # each thread solved its own equation
