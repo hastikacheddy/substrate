@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions        # keeps the pinned action commit hashes current
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

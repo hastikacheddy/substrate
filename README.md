@@ -5,7 +5,7 @@
 **Propagate scientific models across scales, through one representation, with every hop documented and validated.**
 
 ![python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-471-brightgreen)
+![tests](https://img.shields.io/badge/tests-756-brightgreen)
 ![status](https://img.shields.io/badge/status-research%20prototype-orange)
 ![quantum chemistry](https://img.shields.io/badge/quantum%20chemistry-PySCF-6f42c1)
 
@@ -41,8 +41,11 @@ valence-bond model, fitted to one molecule at one level of theory, say anything 
   few-shot learning curves, a coupled-cluster benchmark, and a test of whether the finding survives pinning the bonds to the free diatomics.
 - **Checked against measurement.** NIST proton affinities and acidities are loaded with their uncertainty and citation, and the computed well gaps of the five asymmetric ions are compared with them, with the
   separated fragments relaxed and the enthalpy at 298 K accounted for. Three ions agree to about 0.1 eV; one (fluoride–methanol) misses by 0.2–0.3 eV in the study's basis and agrees in aug-cc-pVTZ.
+- **Treats its inputs as untrusted.** Experiment files are data read with a safe loader (no aliases, bounded depth and size, no `NaN`); every count has a limit set by
+  the environment, not by the file, and is checked before anything is allocated; the cache is sealed; CI audits the pinned dependencies and publishes an SBOM. The threat model, and
+  what is *not* defended, is in [SECURITY.md](SECURITY.md).
 - **Mission control.** A local web GUI over the same engines: edit any input and the whole chain re-runs, or explore the transfer study as a clickable matrix.
-- **Tested hard.** 471 tests, closed-form and independent checks, and mutation testing of the numerical code. Bugs found in my own work are listed, not hidden.
+- **Tested hard.** 756 tests, closed-form and independent checks, and mutation testing of the numerical code. Bugs found in my own work are listed, not hidden.
 
 ## Screenshots
 
@@ -90,7 +93,7 @@ pip install -e ".[dev]"
 
 python -m substrate run experiments/proton_transfer_pathway.yaml     # five scales, nine stages
 python -m substrate gui                                              # mission control, http://127.0.0.1:8765/
-pytest -m "not qc"                                                   # 398 tests, no PySCF needed (1.5–5 min)
+pytest -m "not qc"                                                   # 683 tests, no PySCF needed (1.5–5 min)
 ```
 
 An experiment is a YAML file. Naming only the destination scale is enough when the route is unambiguous, and a `sigma` turns an input into a Monte-Carlo draw through the whole chain:
@@ -120,6 +123,9 @@ wsl bash /mnt/c/<path to this project>/scripts/setup_qc_env.sh
 The engine finds PySCF itself (in-process if importable, otherwise through WSL); `SUBSTRATE_QC_MODE`, `SUBSTRATE_QC_WSL_DISTRO` and `SUBSTRATE_QC_WSL_PYTHON` override discovery.
 Energies are cached by content in `~/.cache/substrate` (or `SUBSTRATE_CACHE_DIR`): the first run of a scan costs minutes, every later run is instant. A coupled-cluster point costs about a
 minute and a half in a large basis, so those jobs are sent to the worker in small chunks.
+
+Every cached energy is sealed with a digest, so a damaged or hand-edited entry is recomputed instead of served. `python -m substrate cache status` counts the entries by state, program
+version and worker; `cache verify [--delete]` and `cache purge --corrupt | --unverified | --worker DIGEST` clean it; `SUBSTRATE_QC_CACHE_STRICT=1` serves only entries the current worker wrote.
 
 ### Examples
 
@@ -572,7 +578,7 @@ Read [docs/limits.md](docs/limits.md); in brief:
 
 ## Validation
 
-471 tests: 398 run without PySCF (1.5–5 minutes), and 73 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
+756 tests: 683 run without PySCF (1.5–5 minutes), and 73 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
 
 - The two-state model equals the engine's diagonalisation to 1e-10; the closed-form calibration recovers a noise-free surface exactly and reports honest uncertainty on a noisy one.
 - The PySCF bridge is checked against physics: the variational principle and the Hartree–Fock limit, invariance under rigid motion, CCSD being exact for two electrons (so the triples correction vanishes),
@@ -591,12 +597,15 @@ src/substrate/
   qc/                                           PySCF bridge: jobs, SQLite energy cache, a standalone worker that runs inside WSL
   calibration.py  transfer.py  diatomics.py     fit the model to a surface; cross-prediction and learning curves; free X–H Morse curves
   datasets.py  data/  fragments.py              measured reference values (NIST proton affinities and acidities) with their provenance; a complex taken apart into its four fragments
+  limits.py  safeload.py                        resource limits (from the environment) and the loader that does not trust an experiment file
   molecules.py                                  templates: Zundel, ammonium dimer, bifluoride, water–ammonia, methanol–water, ...
   gui/                                          the local web GUI: standard-library server, plain HTML/JS, no build step, no external requests
 experiments/                                    runnable experiment files; references/ (24 real surfaces) and benchmarks/ (8 bifluoride surfaces)
 examples/                                       the scripts in the table above
-tests/                                          471 tests
+tests/                                          756 tests
 docs/                                           architecture, science, findings, validation, limits, extending, images
+.github/                                        CI (tests, dependency audit, SBOM), CodeQL, Dependabot; requirements-lock.txt pins the runtime versions
+SECURITY.md                                     the threat model, what is defended, what is not, how to report a vulnerability
 ```
 
 ## Documentation
@@ -615,7 +624,7 @@ docs/                                           architecture, science, findings,
 ```bash
 pip install -e ".[dev]"            # add ".[plots]" for the benchmark figure
 pytest                             # everything; tests marked `qc` need PySCF and skip without it
-pytest -m "not qc"                 # the 398 that do not
+pytest -m "not qc"                 # the 683 that do not
 ```
 
 ## Credits and license

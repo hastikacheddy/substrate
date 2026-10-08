@@ -1,0 +1,8 @@
+# The runtime dependencies at the versions the tests and studies were run with (Python 3.11, Windows and Linux wheels exist for all three).
+# Used by CI to audit for known vulnerabilities and to produce the software bill of materials, and as a constraint when installing:
+#     pip install -e . -c requirements-lock.txt
+# Versions only, not hashes: a hash is per wheel and per platform, and regenerating them means downloading every wheel. Regenerate after a
+# deliberate upgrade with `pip list --format=freeze` in a clean environment and rerun the whole test suite before committing.
+numpy==1.26.4
+scipy==1.14.0
+PyYAML==6.0.1

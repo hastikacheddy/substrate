@@ -2,7 +2,7 @@
 
 [← back to the README](../README.md)
 
-471 tests (73 need PySCF and skip without it). The 398 that do not take 1.5–5 min here depending on what else the machine is doing (90 s on a quiet one, 230–300 s on a busy one; the calibration fits, transfer fits and ensembles dominate), the whole suite 2–7 min with the real-chemistry energies cached (a cold WSL start adds a minute or two, and a first run computes a few hundred single points: ~8 more minutes unloaded, ~20 under load); they use closed-form results and independent calculations rather than the code agreeing with itself:
+756 tests (73 need PySCF and skip without it). The 683 that do not take 1.5–5 min here depending on what else the machine is doing (90 s on a quiet one, 230–300 s on a busy one; the calibration fits, transfer fits and ensembles dominate), the whole suite 2–7 min with the real-chemistry energies cached (a cold WSL start adds a minute or two, and a first run computes a few hundred single points: ~8 more minutes unloaded, ~20 under load); they use closed-form results and independent calculations rather than the code agreeing with itself:
 
 - **Calibration, against known truth.** On a synthetic reference built from known parameters: a noise-free surface is recovered exactly
   (every parameter to 0.2%, fit error 1e-5 eV); with 5 meV of noise, across independent noise realisations, the fitted values land within a few
@@ -102,6 +102,19 @@
   frequency obtained from a five-point finite difference of single-point energies along the bond (4331.2 against 4331.6 cm⁻¹), and rotation and translation then add 7/2 kT; a linear H–O–H, a saddle
   point, is reported as not converged and has no enthalpy; MP2 and coupled cluster are refused. A relaxation or thermo job never shares a cache entry with a single point, and every single point keeps the
   cache key it had before the tasks existed (a recorded hash). Mutation testing: 19 mutants of `datasets.py` and 11 of `fragments.py`, all caught; 11 of the bridge's job and result handling, all caught after a first round found that nothing tested how `PySCFProgram` reads the worker's reply (a stub worker now does); and 15 of the worker's relaxation and thermochemistry, 13 caught. The two survivors are a numerical setting whose effect the tests cannot resolve (the finer DFT grid used for the Hessian moves the zero-point energy by less than the 1% the tests compare to) and the optimiser's own convergence flag (no cheap case fails to converge).
+- **Untrusted input, resource limits and the energy cache** (`tests/test_limits.py`, `tests/test_safeload.py`, `tests/test_qc_cache.py`, `tests/test_policy.py`). Each limit is exercised
+  where it is enforced, with a small ceiling and a modestly larger request, so that if the guard were removed the work that followed would still be small (a first version asked for
+  10⁹ points, and when mutation testing removed the guard the test ran until its timeout). Checked: the defaults and the environment override; that a limit set to nothing sensible is an
+  error naming the variable; that `nan`, `inf`, fractions, booleans and strings are refused as counts; that every engine refuses an oversized axis, a product of axes and (for the
+  Schrödinger engine) the eigenvector storage; that the scan refuses before building a geometry; that `compute_cached` refuses too many jobs, too many expensive ones and too many atoms
+  before the cache is even opened; that the ensemble size is refused before the chain runs; that a file cannot raise its own ceiling; that paths and separators in a basis or theory
+  name are refused. The loader: a billion-laughs document is refused unexpanded, nesting is refused at 41 levels and not at 40 (and a hundred sibling lists are not mistaken for depth),
+  too many nodes, a file over 1 MB, `NaN` and `Infinity` in JSON, and every experiment shipped in this repository still loads. The cache: an edited, garbled, forged or non-finite entry is not
+  served and is recomputed; an entry from before digests is served and reported; strict mode serves only the current worker's; audit, purge and the command-line exit codes. The policy test is
+  a static scan of every module: no `eval`, `exec`, `pickle`, `marshal`, `os.system` or `shell=True`, no unsafe YAML loader, and only the listed modules may start a process or touch the
+  network (it was shown to fail on a planted module that did all four). Mutation testing: 28 mutants of the places the limits are applied, 26 of the cache and name checks, 9 of the loader,
+  18 of `limits.py` and 6 of the cache command, all caught. Two things this found: the mutation runner had been running tests from the wrong directory for some files (it now checks its own
+  baseline), and the one surviving mutant of the cache (strict mode also testing the state, not just the worker) is equivalent, since a legacy entry has no worker.
 - **The tests can fail.** Deliberately injected bugs (a 1% coupling error, a 1 meV surface shift, no mass weighting, no zero-point term,
   a wrong coordinate-transform row, an inverted K_d, the wrong state's population, a broken stationary-distribution step, swapped
   chemical rates, context parameters not carried, a wrong Haldane factor, a flipped exchange-law sign, a dropped reverse-rate sign, a

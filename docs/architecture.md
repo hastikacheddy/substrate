@@ -44,6 +44,14 @@ and makes you name the route.
   method, basis, charge, spin, program). A missing program raises `QCError`, deliberately *not* a `ValidationError`: an ensemble drops
   invalid draws, but it must stop for an environment failure. Non-convergence is reported through the result and becomes a
   `ValidationError`.
+  Each cached entry is sealed with a SHA-256 digest and the hash of the worker source that wrote it; an entry that fails its digest, or holds a non-finite energy, is not
+  served but recomputed, and `python -m substrate cache` audits and cleans the file. The key is unchanged, so no existing cache is invalidated.
+- **`limits.py` and `safeload.py`: the input boundary.** Experiment files are not trusted. `safeload` reads YAML and JSON without expanding aliases, with bounded
+  depth, node count and file size, and refuses `NaN` and `Infinity`; `experiment.parse_experiment` then checks every parameter is finite and every sigma non-negative.
+  `limits` holds the ceilings on counts (grid points, time steps, ensemble draws, quantum-chemistry jobs, atoms, references) and the helpers that check them
+  (`whole_number`, `require`); the ceilings come from `SUBSTRATE_MAX_*` environment variables, never from a file, and each is enforced where the work would start (the
+  engines, `Pipeline.run`, `compute_cached`). A refusal is a `ResourceLimitError`, deliberately not a `ValidationError`, so an ensemble cannot drop it and carry on.
+  `qc.check_request` also requires theory and basis strings to look like names, because PySCF reads an unknown basis string as a file path. The threat model is `SECURITY.md`.
 - **`datasets.py` and `fragments.py`: measured reference values.** `datasets.py` loads curated tables of measured numbers
   (`data/nist_ion_energetics.yaml`: gas-phase proton affinities and acidities from the NIST Chemistry WebBook) as `ReferenceValue`s that keep their unit
   conversion, uncertainty, method and citation; `experimental_well_gap(template)` turns two of them into the measured energy difference between
