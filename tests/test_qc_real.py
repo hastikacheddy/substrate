@@ -105,6 +105,124 @@ def test_recorded_bifluoride_coupled_cluster_energies_guard_against_a_change_in_
     assert energy(fhf, charge=-1, theory="ccsd(t)", basis="6-31+g*").energy_hartree == pytest.approx(-199.87929693, abs=1e-6)
 
 
+# -- geometry relaxation ---------------------------------------------------------------------------------------------------------------------
+def relax(atoms, charge=0, theory="hf", basis="6-31g*"):
+    job = QCJob(tuple((sym, float(x), float(y), float(z)) for sym, x, y, z in atoms), charge, 0, theory, basis, "relax")
+    return compute_cached(program, [job], QCCache())[0][0]
+
+
+def _bond_and_angle(geometry):
+    o, h1, h2 = (np.array(a[1:]) for a in geometry)
+    v1, v2 = h1 - o, h2 - o
+    return np.linalg.norm(v1), math.degrees(math.acos(v1 @ v2 / (np.linalg.norm(v1) * np.linalg.norm(v2))))
+
+
+DISTORTED_WATER = [("O", 0.0, 0.0, 0.1173), ("H", 0.0, 0.92, -0.40), ("H", 0.0, -0.70, -0.52)]            # stretched on one side, bent on the other
+
+
+def _water(r, theta_degrees):
+    half = math.radians(theta_degrees) / 2.0
+    return [("O", 0.0, 0.0, 0.0), ("H", 0.0, r * math.sin(half), -r * math.cos(half)), ("H", 0.0, -r * math.sin(half), -r * math.cos(half))]
+
+
+def test_a_distorted_water_relaxes_to_the_known_hartree_fock_minimum():
+    """HF/6-31G* water: O-H 0.947 angstrom, H-O-H 105.5 degrees. The check does not use a quoted total energy (those depend on whether the
+    d functions are Cartesian or spherical, which differ between programs): the relaxed energy must equal the single-point energy at the known
+    minimum, computed by the same program, and lie below it at geometries displaced from there in every direction."""
+    result = relax(DISTORTED_WATER)
+    assert result.converged and result.initial_energy_hartree > result.energy_hartree + 0.005          # it started well above the minimum
+    at_minimum = energy(_water(0.947, 105.5), basis="6-31g*").energy_hartree
+    assert result.energy_hartree == pytest.approx(at_minimum, abs=3e-5) and result.energy_hartree <= at_minimum + 1e-6
+    for r, theta in ((0.967, 105.5), (0.927, 105.5), (0.947, 108.5), (0.947, 102.5)):
+        assert energy(_water(r, theta), basis="6-31g*").energy_hartree > result.energy_hartree + 1e-4   # a minimum along the bond length and the angle
+    bond, angle = _bond_and_angle(result.geometry)
+    assert bond == pytest.approx(0.947, abs=0.004) and angle == pytest.approx(105.5, abs=0.6)
+    assert [a[0] for a in result.geometry] == ["O", "H", "H"]                                           # the atoms come back in the order they went in
+
+
+def test_relaxation_does_not_care_where_the_molecule_is_or_how_it_is_turned_and_a_minimum_stays_put():
+    c, s = math.cos(0.9), math.sin(0.9)
+    moved = [(sym, c * x - s * y + 2.0, s * x + c * y - 1.0, z + 3.0) for sym, x, y, z in DISTORTED_WATER]
+    assert relax(moved).energy_hartree == pytest.approx(relax(DISTORTED_WATER).energy_hartree, abs=3e-6)
+    minimum = relax(DISTORTED_WATER)
+    again = relax(minimum.geometry)
+    assert again.energy_hartree == pytest.approx(minimum.energy_hartree, abs=2e-6)
+    assert again.initial_energy_hartree - again.energy_hartree < 1e-5                                   # nothing left to gain
+    assert max(np.linalg.norm(np.array(a[1:]) - np.array(b[1:])) for a, b in zip(minimum.geometry, again.geometry)) < 0.01
+
+
+def test_correlated_and_density_functional_relaxations_find_their_own_longer_bond_and_a_lower_energy_than_the_start():
+    hf = _bond_and_angle(relax(DISTORTED_WATER).geometry)[0]
+    for theory in ("mp2", "dft:b3lyp"):
+        result = relax(DISTORTED_WATER, theory=theory)
+        bond, angle = _bond_and_angle(result.geometry)
+        assert result.converged and result.energy_hartree < result.initial_energy_hartree - 0.005, theory
+        assert bond > hf + 0.005 and 0.95 < bond < 0.975 and 103.0 < angle < 106.5, theory             # correlation lengthens the bond, as it does in the literature
+
+
+def test_a_relaxation_that_cannot_be_done_is_refused_instead_of_approximated():
+    with pytest.raises(QCError, match="closed-shell Hartree-Fock, MP2 and DFT only"):
+        relax(DISTORTED_WATER, theory="ccsd(t)")
+    with pytest.raises(QCError, match="closed-shell"):
+        compute_cached(program, [QCJob((("H", 0.0, 0.0, 0.0),), 0, 1, "hf", "6-31g", "relax")], QCCache())
+
+
+# -- harmonic thermochemistry ------------------------------------------------------------------------------------------------------------------
+KT_HARTREE = 3.166811563455608e-6 * 298.15                    # Boltzmann's constant in hartree per kelvin, times the temperature
+HYDROGEN_MASS, FLUORINE_MASS, ELECTRON_MASSES_PER_AMU = 1.00782503223, 18.99840316273, 1822.888486209
+
+
+def thermo(atoms, charge=0, theory="hf", basis="6-31g*"):
+    job = QCJob(tuple((sym, float(x), float(y), float(z)) for sym, x, y, z in atoms), charge, 0, theory, basis, "thermo")
+    return compute_cached(program, [job], QCCache())[0][0]
+
+
+def test_an_atom_has_only_translation_so_its_enthalpy_is_five_halves_kt_above_its_energy():
+    result = thermo(HELIUM)
+    assert result.zero_point_hartree == 0.0
+    assert result.enthalpy_298_hartree - result.energy_hartree == pytest.approx(2.5 * KT_HARTREE, abs=1e-8)       # 3/2 kT of translation + pV = kT
+
+
+def test_the_zero_point_energy_of_a_diatomic_is_half_the_frequency_of_its_own_energy_curve():
+    """An independent route: the force constant from a five-point finite difference of single-point energies along the bond, then
+    omega = sqrt(k / mu). The linear molecule's rotation and translation then add 7/2 kT (3/2 + 1 + 1), and the vibrational part is negligible."""
+    result = thermo([("H", 0.0, 0.0, 0.0), ("F", 0.0, 0.0, 1.05)])                                                    # started well off the minimum (0.912 angstrom)
+    assert result.converged
+    bond = float(np.linalg.norm(np.array(result.geometry[1][1:]) - np.array(result.geometry[0][1:])))
+    step = 0.02                                                                                                         # angstrom
+
+    def curve(offset):
+        return energy([("H", 0.0, 0.0, 0.0), ("F", 0.0, 0.0, bond + offset)], basis="6-31g*").energy_hartree
+
+    bohr = 0.529177210903
+    k = (-curve(2 * step) + 16 * curve(step) - 30 * curve(0.0) + 16 * curve(-step) - curve(-2 * step)) / (12 * (step / bohr) ** 2)
+    mu = HYDROGEN_MASS * FLUORINE_MASS / (HYDROGEN_MASS + FLUORINE_MASS) * ELECTRON_MASSES_PER_AMU
+    omega = math.sqrt(k / mu)                                                                                           # hartree
+    assert 0.018 < omega < 0.021                                                                                        # 3,950-4,600 cm-1: the right order for H-F
+    assert result.zero_point_hartree == pytest.approx(omega / 2, rel=0.01)
+    assert result.enthalpy_298_hartree - result.energy_hartree - result.zero_point_hartree == pytest.approx(3.5 * KT_HARTREE, abs=2e-6)
+
+
+def test_thermochemistry_follows_the_method_and_a_density_functional_works_too():
+    hf, b3lyp = thermo([("H", 0.0, 0.0, 0.0), ("F", 0.0, 0.0, 0.92)]), thermo([("H", 0.0, 0.0, 0.0), ("F", 0.0, 0.0, 0.92)], theory="dft:b3lyp")
+    assert b3lyp.converged and b3lyp.zero_point_hartree < hf.zero_point_hartree          # B3LYP gives a softer H-F bond than Hartree-Fock
+    assert b3lyp.energy_hartree < hf.energy_hartree
+
+
+def test_a_saddle_point_has_no_thermochemistry_and_is_reported_as_not_converged():
+    linear_water = [("O", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.96), ("H", 0.0, 0.0, -0.96)]       # the bending mode of a linear H-O-H is imaginary
+    result = thermo(linear_water)
+    assert not result.converged and result.enthalpy_298_hartree is None and result.zero_point_hartree is None
+
+
+def test_thermochemistry_is_refused_where_there_is_no_analytic_hessian():
+    for theory in ("mp2", "ccsd(t)"):
+        with pytest.raises(QCError, match="closed-shell Hartree-Fock and DFT only"):
+            thermo(HELIUM, theory=theory)
+    with pytest.raises(QCError, match="closed-shell"):
+        compute_cached(program, [QCJob((("H", 0.0, 0.0, 0.0),), 0, 1, "hf", "6-31g", "thermo")], QCCache())
+
+
 # -- the Zundel cation: a real proton-transfer surface ---------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def surface():

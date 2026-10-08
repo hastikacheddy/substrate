@@ -5,6 +5,7 @@ program whose energies are an analytic formula, so a mistake in the engine shows
 the tests run in milliseconds. The chemistry is tested against real PySCF, through WSL on this machine, and skipped where
 PySCF is not installed.
 """
+import json
 import math
 import tempfile
 from pathlib import Path
@@ -336,3 +337,82 @@ def test_coupled_cluster_jobs_are_sent_in_chunks_of_six_and_cheap_ones_in_chunks
     compute_cached(program, _hydrogen_molecules("hf", 9, start=500) + _hydrogen_molecules("ccsd(t)", 1, start=500), cache)
     assert program.sizes == [6, 4] and max(program.sizes) <= 6
     assert _hydrogen_molecules("ccsd(t)", 1)[0].key("p") != _hydrogen_molecules("ccsd", 1)[0].key("p")        # the two never share a cached energy
+
+
+# -- relaxation jobs: a second task that shares the cache without disturbing a single cached energy --------------------------------------------
+WATER_ATOMS = (("O", 0.0, 0.0, 0.1173), ("H", 0.0, 0.7572, -0.4692), ("H", 0.0, -0.7572, -0.4692))
+
+
+def test_a_single_point_keeps_the_cache_key_it_had_before_relaxation_jobs_existed():
+    """The task is added to the hash only when it is not "energy", so every energy already on disk is still found. The recorded key was computed
+    before the field existed: if this fails, the change has invalidated every user's cache."""
+    job = QCJob(WATER_ATOMS, 0, 0, "hf", "6-31g*")
+    assert job.task == "energy" and job.key("pyscf") == "845240efa9b2a4bc7f1483134b9c5891fdc532f8288be6583eed97d833b05df9"
+    relax = QCJob(WATER_ATOMS, 0, 0, "hf", "6-31g*", "relax")
+    assert relax.key("pyscf") != job.key("pyscf")                                           # a relaxation never answers for a single point, or the reverse
+    assert relax.key("pyscf") == QCJob(WATER_ATOMS, 0, 0, "HF", "6-31G*", "relax").key("pyscf")
+    thermo = QCJob(WATER_ATOMS, 0, 0, "hf", "6-31g*", "thermo")
+    assert thermo.key("pyscf") not in (job.key("pyscf"), relax.key("pyscf"))                 # the three tasks never share an answer
+
+
+def test_a_result_carries_a_relaxed_geometry_through_json_and_an_old_one_has_none():
+    result = QCResult(-76.0, True, None, "p", (("O", 0.0, 0.0, 0.1), ("H", 0.0, 0.76, -0.47)), -75.9)
+    again = QCResult.from_dict(json.loads(json.dumps(result.to_dict())))
+    assert again == result and again.geometry[0] == ("O", 0.0, 0.0, 0.1) and again.initial_energy_hartree == -75.9
+    old = QCResult.from_dict({"energy": -1.0, "converged": True, "homo_lumo_gap": 0.3, "program": "p"})        # a payload written before relaxation existed
+    assert old.geometry is None and old.initial_energy_hartree is None and old.energy_hartree == -1.0
+    assert "geometry" not in QCResult(-1.0, True).to_dict()                                  # a single point's payload is unchanged
+
+
+def test_a_result_carries_its_thermochemistry_through_json_and_a_relaxation_has_none():
+    geometry = (("He", 0.0, 0.0, 0.0),)
+    result = QCResult(-2.8, True, None, "p", geometry, -2.7, 0.0213, -76.01)
+    again = QCResult.from_dict(json.loads(json.dumps(result.to_dict())))
+    assert again == result and again.zero_point_hartree == 0.0213 and again.enthalpy_298_hartree == -76.01
+    relaxation = QCResult.from_dict(QCResult(-2.8, True, None, "p", geometry, -2.7).to_dict())
+    assert relaxation.zero_point_hartree is None and relaxation.enthalpy_298_hartree is None
+    assert "zero_point" not in QCResult(-2.8, True, None, "p", geometry, -2.7).to_dict()
+    from substrate.qc import CC_CHUNK, CHUNK, chunk_size
+    assert chunk_size([QCJob(WATER_ATOMS, 0, 0, "hf", "6-31g*", "thermo")]) == CC_CHUNK                 # a Hessian per job: small chunks, like a relaxation
+    assert chunk_size([QCJob(WATER_ATOMS, 0, 0, "hf", "6-31g*")]) == CHUNK
+
+
+def test_the_program_sends_the_task_to_the_worker_and_reads_back_geometry_and_thermochemistry():
+    """PySCFProgram between the engine and the worker, with the worker replaced by a recording stub (no PySCF needed)."""
+    class Stub(PySCFProgram):
+        def __init__(self):
+            super().__init__(mode="local")
+            self.requests, self.version = [], "stub 1"
+
+        def _run_local(self, requests):
+            self.requests = requests
+            return [{"id": 0, "energy": -76.0, "converged": True, "homo_lumo_gap": None, "initial_energy": -75.9,
+                     "geometry": [["O", 0.0, 0.0, 0.1], ["H", 0.0, 0.76, -0.47]], "zero_point": 0.021, "enthalpy_298": -75.97},
+                    {"id": 1, "energy": -1.0, "converged": True, "homo_lumo_gap": 0.5}]
+
+    stub = Stub()
+    thermo, single = stub.compute([QCJob(WATER_ATOMS, 0, 0, "hf", "6-31g*", "thermo"), QCJob(WATER_ATOMS, 0, 0, "hf", "6-31g*")])
+    assert [r["task"] for r in stub.requests] == ["thermo", "energy"] and [r["id"] for r in stub.requests] == [0, 1]
+    assert thermo.geometry == (("O", 0.0, 0.0, 0.1), ("H", 0.0, 0.76, -0.47)) and thermo.initial_energy_hartree == -75.9
+    assert (thermo.zero_point_hartree, thermo.enthalpy_298_hartree, thermo.program) == (0.021, -75.97, "stub 1")
+    assert single.geometry is None and single.zero_point_hartree is None and single.homo_lumo_gap_hartree == 0.5       # a single point is read as before
+
+
+def test_relaxation_jobs_are_cached_with_their_geometry_and_travel_in_small_chunks(tmp_path):
+    class Relaxer(QCProgram):
+        name = "relaxer"
+
+        def __init__(self):
+            self.sizes = []
+
+        def compute(self, jobs):
+            self.sizes.append(len(jobs))
+            return [QCResult(-1.0 - j.atoms[0][3], True, None, "r", tuple((s, x, y, z * 0.5) for s, x, y, z in j.atoms), -0.5) for j in jobs]
+
+    cache, program = QCCache(tmp_path / "c.sqlite3"), Relaxer()
+    jobs = [QCJob((("H", 0.0, 0.0, float(i)), ("H", 0.0, 0.0, i + 0.8)), 0, 0, "hf", "6-31g", "relax") for i in range(8)]
+    first, run, cached = compute_cached(program, jobs, cache)
+    assert (program.sizes, run, cached) == ([6, 2], 8, 0)                                    # six at a time, like coupled cluster
+    again, run, cached = compute_cached(program, jobs, cache)
+    assert (run, cached, program.sizes) == (0, 8, [6, 2]) and again == first                 # all from disk, geometry and starting energy included
+    assert again[3].geometry == (("H", 0.0, 0.0, 1.5), ("H", 0.0, 0.0, 1.9)) and again[3].initial_energy_hartree == -0.5

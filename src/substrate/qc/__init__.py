@@ -38,20 +38,24 @@ CC_CHUNK = 6                                # the same for coupled cluster, whos
 
 
 def chunk_size(jobs: Sequence["QCJob"]) -> int:
-    """Jobs per worker process: small when any job is coupled cluster (about a minute or more each), so a chunk finishes inside the
-    timeout and a failure loses little."""
-    return CC_CHUNK if any(job.theory.lower().startswith("ccsd") for job in jobs) else CHUNK
+    """Jobs per worker process: small when any job is coupled cluster or a geometry relaxation (about a minute or more each), so a chunk
+    finishes inside the timeout and a failure loses little."""
+    return CC_CHUNK if any(job.theory.lower().startswith("ccsd") or job.task != "energy" for job in jobs) else CHUNK
 
 
 @dataclass(frozen=True)
 class QCJob:
-    """One single-point energy: geometry in angstrom, total charge, spin = 2S, and the level of theory."""
+    """One calculation: geometry in angstrom, total charge, spin = 2S, and the level of theory. `task` is "energy" (a single point, the
+    default), "relax" (minimise the energy over every atom's position, starting from this geometry, with analytic gradients; the result
+    carries the relaxed geometry and the energy at the start) or "thermo" (relax tightly, then take the harmonic frequencies there; the
+    result also carries the zero-point energy and the enthalpy at 298.15 K and 1 atm, rigid rotor and harmonic oscillator)."""
 
     atoms: tuple[tuple[str, float, float, float], ...]
     charge: int
     spin: int
     theory: str
     basis: str
+    task: str = "energy"
 
     def key(self, program: str) -> str:
         """Content hash: same geometry (to 1e-8 angstrom), same method, same program -> same key."""
@@ -60,6 +64,8 @@ class QCJob:
             "charge": self.charge, "spin": self.spin,
             "atoms": [[s, round(x, 8), round(y, 8), round(z, 8)] for s, x, y, z in self.atoms],
         }
+        if self.task != "energy":                    # added only when it differs, so every cached single point keeps its key
+            canonical["task"] = self.task
         return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
 
 
@@ -69,14 +75,27 @@ class QCResult:
     converged: bool
     homo_lumo_gap_hartree: float | None = None
     program: str = ""
+    geometry: tuple[tuple[str, float, float, float], ...] | None = None      # a relaxation's final atoms, angstrom
+    initial_energy_hartree: float | None = None                              # a relaxation's energy at the geometry it started from
+    zero_point_hartree: float | None = None                                  # a thermo job's harmonic zero-point energy
+    enthalpy_298_hartree: float | None = None                                # ... and its total enthalpy at 298.15 K (electronic energy included)
 
     def to_dict(self) -> dict:
-        return {"energy": self.energy_hartree, "converged": self.converged,
-                "homo_lumo_gap": self.homo_lumo_gap_hartree, "program": self.program}
+        d = {"energy": self.energy_hartree, "converged": self.converged,
+             "homo_lumo_gap": self.homo_lumo_gap_hartree, "program": self.program}
+        if self.geometry is not None:
+            d["geometry"] = [list(a) for a in self.geometry]
+            d["initial_energy"] = self.initial_energy_hartree
+        if self.enthalpy_298_hartree is not None:
+            d["zero_point"] = self.zero_point_hartree
+            d["enthalpy_298"] = self.enthalpy_298_hartree
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "QCResult":
-        return cls(d["energy"], d["converged"], d.get("homo_lumo_gap"), d.get("program", ""))
+        geometry = None if d.get("geometry") is None else tuple((a[0], float(a[1]), float(a[2]), float(a[3])) for a in d["geometry"])
+        return cls(d["energy"], d["converged"], d.get("homo_lumo_gap"), d.get("program", ""), geometry, d.get("initial_energy"),
+                   d.get("zero_point"), d.get("enthalpy_298"))
 
 
 class QCProgram(ABC):
@@ -211,7 +230,7 @@ class PySCFProgram(QCProgram):
     def compute(self, jobs: Sequence[QCJob]) -> list[QCResult]:
         requests = [
             {"id": i, "atoms": [list(a) for a in job.atoms], "charge": job.charge, "spin": job.spin,
-             "theory": job.theory, "basis": job.basis}
+             "theory": job.theory, "basis": job.basis, "task": job.task}
             for i, job in enumerate(jobs)
         ]
         raw = self._run_local(requests) if self.mode() == "local" else self._run_wsl(requests)
@@ -223,7 +242,7 @@ class PySCFProgram(QCProgram):
                 raise QCError(f"PySCF worker returned no result for job {i}")
             if "error" in r:
                 raise QCError(f"PySCF failed on job {i}: {r['error']}")
-            results.append(QCResult(r["energy"], r["converged"], r.get("homo_lumo_gap"), self.version or "pyscf"))
+            results.append(QCResult.from_dict({**r, "program": self.version or "pyscf"}))
         return results
 
     def _run_local(self, requests: list[dict]) -> list[dict]:
