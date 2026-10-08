@@ -4,6 +4,6 @@
 -r requirements-lock.txt
 pytest==9.0.3
 iniconfig==2.3.0
-packaging==23.2
+packaging==26.3
 pluggy==1.6.0
 colorama==0.4.6; sys_platform == "win32"
