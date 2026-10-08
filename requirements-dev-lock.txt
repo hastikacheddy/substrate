@@ -2,7 +2,7 @@
 # CI installs with `pip install -e ".[dev]" -c requirements-dev-lock.txt`: a constraint, so anything not listed here (the backports pytest needs
 # on Python 3.10, for example) is still resolved normally.
 -r requirements-lock.txt
-pytest==9.0.3
+pytest==9.1.1
 iniconfig==2.3.0
 packaging==23.2
 pluggy==1.6.0
