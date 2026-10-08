@@ -89,7 +89,7 @@ def bifluoride_anion() -> dict:
 def water_ammonia_cation(r_oh: float = 0.98, theta_o: float = 112.0, hoh: float = 104.5, r_nh: float = 1.02, theta_n: float = 110.0,
                          twist: float = 90.0) -> dict:
     """[H2O...H...NH3]+: a proton between a water and an ammonia, the first ASYMMETRIC template. Ammonia holds a proton far more tightly
-    than water (the gas-phase proton affinities differ by about 1.7 eV), so the proton sits on the nitrogen and the surface is not
+    than water (the NIST proton affinities, 853.6 and 691.0 kJ/mol, differ by 162.6 kJ/mol = 1.69 eV), so the proton sits on the nitrogen and the surface is not
     symmetric under exchanging donor and acceptor: do NOT use `mirror_symmetric` with it (the engine would refuse).
 
     Donor = the water oxygen, acceptor = the ammonia nitrogen, so the reactant (proton on oxygen) is the high-energy side. The flank
@@ -210,8 +210,8 @@ def fluoride_methanol_anion(r_oc: float = 1.43, theta_c: float = 109.0, r_ch: fl
     carries a methyl group. It is NOT a pure one-substituent derivative of FHF-, which has no heavy-atom hydrogen to replace: one fluoride
     is swapped for methoxide, so the heavy atom changes as well as the methyl appearing.
 
-    Methoxide is the stronger base (gas-phase acidities, hydrogen fluoride ~1554 and methanol ~1590 kJ/mol, each uncertain by ~8; a gap of
-    about 0.4 eV), so the proton prefers the oxygen; do NOT use `mirror_symmetric` with it. Donor = the fluorine (the lower-proton-affinity
+    Methoxide is the stronger base (NIST gas-phase acidities, hydrogen fluoride 1555 +- 5 and methanol 1597 +- 8 kJ/mol; a gap of 42 +- 9
+    kJ/mol = 0.44 +- 0.09 eV), so the proton prefers the oxygen; do NOT use `mirror_symmetric` with it. Donor = the fluorine (the lower-proton-affinity
     side, so the reactant, proton on fluorine, is the higher-energy well), acceptor = the methoxide oxygen. The donor flank is empty (a bare
     fluorine, as in the bifluoride template); the acceptor flank is a methoxy group: C-O `r_oc`, `theta_c` degrees from the O...proton axis,
     a methyl with C-H `r_ch` and H-C-O = `hco`, staggered with one C-H anti to the hydrogen bond (`rotor` turns it, `twist` turns the whole
@@ -227,8 +227,8 @@ def fluoride_methanol_anion(r_oc: float = 1.43, theta_c: float = 109.0, r_ch: fl
 def chloride_hf_anion() -> dict:
     """[Cl...H...F]-: a proton between a chloride and a fluoride, the chloride-hydrogen fluoride complex Cl-...HF: a STRONGLY asymmetric
     F-H-Cl ANION, the strong counterpart of the mildly asymmetric fluoride-methanol ion and, like it, an asymmetric neighbour of the symmetric
-    bifluoride ion (a fluoride swapped for chloride). Fluoride is by far the stronger base (gas-phase acidities, hydrogen fluoride ~1554 and
-    hydrogen chloride ~1395 kJ/mol, a gap of about 1.65 eV, like water-ammonia's 1.7), so the proton sits on the fluorine; do NOT use
+    bifluoride ion (a fluoride swapped for chloride). Fluoride is by far the stronger base (NIST gas-phase acidities, hydrogen fluoride 1555 +- 5 and
+    hydrogen chloride 1394.9 kJ/mol, a gap of 160 +- 5 kJ/mol = 1.66 eV, like water-ammonia's 1.69), so the proton sits on the fluorine; do NOT use
     `mirror_symmetric` with it. Donor = the chloride (the lower-proton-affinity side, so the reactant, proton on chlorine, is the higher-
     energy well), acceptor = the fluoride. Like the bifluoride, a bare collinear triatomic: no flanking groups, so the rigid-group
     approximation is exact. The two bonds differ (Cl-H about 1.3 A, F-H about 0.93 A), which the shared-Morse model cannot place: its
@@ -242,8 +242,8 @@ def chloride_hf_anion() -> dict:
 
 def methanol_water_cation(r_oh: float = 0.98, theta_o: float = 112.0, hoh: float = 104.5, r_oh_m: float = 0.98, r_oc: float = 1.50,
                           theta_m: float = 112.0, coh: float = 114.0, r_ch: float = 1.09, hco: float = 107.0, twist: float = 90.0, rotor: float = 0.0) -> dict:
-    """[H2O...H...HOCH3]+: a proton between a water and a methanol, a MILDLY asymmetric O-H-O ion (the gas-phase proton affinities of methanol
-    and water differ by about 0.65 eV, against about 1.7 eV for ammonia and water): between the symmetric Zundel ion and the strongly
+    """[H2O...H...HOCH3]+: a proton between a water and a methanol, a MILDLY asymmetric O-H-O ion (the NIST proton affinities of methanol
+    and water differ by 63.3 kJ/mol = 0.66 eV, against 1.69 eV for ammonia and water): between the symmetric Zundel ion and the strongly
     asymmetric water-ammonia ion. The proton prefers the methanol oxygen; do NOT use `mirror_symmetric` with it.
 
     Donor = the water oxygen (the lower-proton-affinity side, so the reactant, proton on water, is the higher-energy well), acceptor = the

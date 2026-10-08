@@ -1,8 +1,8 @@
 # Reference surface: fluoride-methanol anion [F...H...OCH3]- (F-H-O), mp2/6-31+g*.
 # The fourth ASYMMETRIC reference in the multi-molecule calibration study, and the first ANION: the nearest asymmetric neighbour of the symmetric
 # bifluoride ion that carries a methyl group (one fluoride swapped for methoxide; FHF- has no heavy-atom hydrogen to replace, so this is NOT a
-# pure one-substituent derivative: the heavy atom changes too). Methoxide is the stronger base (gas-phase acidities: HF ~1554, methanol ~1590
-# kJ/mol, each uncertain by ~8, a gap of ~0.4 eV; Hartree-Fock puts the well gap at 0.5-0.8 eV), so the proton prefers the oxygen; the fluorine-side
+# pure one-substituent derivative: the heavy atom changes too). Methoxide is the stronger base (NIST gas-phase acidities: HF 1555 +- 5, methanol 1597 +- 8
+# kJ/mol, a gap of 42 +- 9 kJ/mol = 0.44 +- 0.09 eV; Hartree-Fock puts the well gap at 0.5-0.8 eV), so the proton prefers the oxygen; the fluorine-side
 # (donor) well is the higher one, from F...O ~ 2.55 A.
 # The surface is NOT symmetric under exchanging donor and acceptor, so the full proton range is computed (no mirror symmetry) and the model's
 # diabatic offset is a free parameter in the fit. "Barrier" in the comparisons is measured from the donor-side (fluorine) well.

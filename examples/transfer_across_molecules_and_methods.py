@@ -9,7 +9,7 @@ other:
     bifluoride     FHF-   (F-H-F)   HF, B3LYP, MP2 at 6-31+G*
     water-ammonia  H2O-H-NH3+ (O-H-N)  HF, B3LYP, MP2 at 6-31G*   (ASYMMETRIC: the model's energy offset is a free parameter,
                                                        and its experiment files declare a wider fit window, 2.5 eV)
-    methanol-water H2O-H-O(H)CH3+ (O-H-O)  HF, B3LYP, MP2 at 6-31G*  (MILDLY asymmetric: proton-affinity gap ~0.65 eV, against ~1.7 for water-ammonia)
+    methanol-water H2O-H-O(H)CH3+ (O-H-O)  HF, B3LYP, MP2 at 6-31G*  (MILDLY asymmetric: proton-affinity gap 0.66 eV (NIST), against 1.69 for water-ammonia)
     ammonia-methylamine H3N-H-NH2CH3+ (N-H-N)  HF, B3LYP, MP2 at 6-31G*  (MILDLY asymmetric, ~0.47 eV: the methyl derivative of the ammonium dimer)
     fluoride-methanol  F-H-OCH3- (F-H-O)  HF, B3LYP, MP2 at 6-31+G*  (an ANION, mildly asymmetric: one bifluoride fluoride swapped for methoxide; not a pure derivative)
 

@@ -20,7 +20,7 @@ substrate = "substrate.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-substrate = ["gui/static/*"]
+substrate = ["gui/static/*", "data/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

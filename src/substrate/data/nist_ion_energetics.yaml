@@ -1,0 +1,43 @@
+# Gas-phase proton affinities and acidities, transcribed from the NIST Chemistry WebBook (NIST Standard Reference Database Number 69),
+# section "Gas phase ion energetics data". Only the values this project compares against are kept, each with the entry it was read from; the
+# full evaluated tables are at the URLs below, and the WebBook's own notice and disclaimer applies to them.
+#
+# proton_affinity   M + H+ -> MH+, the enthalpy at 298 K (the evaluation of Hunter and Lias, 1998; NIST lists no uncertainty for it)
+# acidity           AH -> A- + H+, the enthalpy (delta_r_H) at 298 K, which is the proton affinity of the anion A-; the NIST rows carry the
+#                   uncertainty of the entry they average or quote
+# acidity_gibbs     the same with the Gibbs energy; always smaller than the enthalpy (the entropy of the free proton), used as a consistency check
+source:
+  database: NIST Chemistry WebBook, NIST Standard Reference Database Number 69
+  section: Gas phase ion energetics data
+  url_template: "https://webbook.nist.gov/cgi/cbook.cgi?ID={cas}&Units=SI&Mask=20"
+  retrieved: "2026-10-08"
+  unit: kJ/mol
+  note: >
+    Values are as printed by the WebBook on the retrieval date. Where a page prints a proton affinity without a decimal (water: 691) the value is
+    recorded with one (691.0). The WebBook gives no uncertainty for the Hunter and Lias proton affinities; none is invented here.
+
+species:
+  H2O:   {name: water,                cas: C7732185, basic_atom: O}
+  NH3:   {name: ammonia,              cas: C7664417, basic_atom: N}
+  CH3OH: {name: methanol,             cas: C67561,   basic_atom: O}
+  CH3NH2: {name: methylamine,         cas: C74895,   basic_atom: N}
+  HF:    {name: hydrogen fluoride,    cas: C7664393, basic_atom: F}
+  HCl:   {name: hydrogen chloride,    cas: C7647010, basic_atom: Cl}
+
+values:
+  - {id: pa_h2o,    quantity: proton_affinity, species: H2O,    value: 691.0, uncertainty: null, method: review, reference: "Hunter and Lias, 1998", comment: "HL; the page prints 691"}
+  - {id: pa_nh3,    quantity: proton_affinity, species: NH3,    value: 853.6, uncertainty: null, method: review, reference: "Hunter and Lias, 1998", comment: HL}
+  - {id: pa_ch3oh,  quantity: proton_affinity, species: CH3OH,  value: 754.3, uncertainty: null, method: review, reference: "Hunter and Lias, 1998", comment: HL}
+  - {id: pa_ch3nh2, quantity: proton_affinity, species: CH3NH2, value: 899.0, uncertainty: null, method: review, reference: "Hunter and Lias, 1998", comment: HL}
+
+  - {id: acidity_hf,    quantity: acidity, species: HF,    value: 1555.0, uncertainty: 5.0, method: AVG, reference: "average of 6 of 7 values (no single reference)",
+     comment: "NIST row for the de-protonation reaction F- + H+ = HF"}
+  - {id: acidity_hcl,   quantity: acidity, species: HCl,   value: 1394.9, uncertainty: 0.0072, method: "N/A", reference: "Martin and Hepburn, 1998",
+     comment: "from Given: dHacid(0K) = 116288.7 +- 0.6 cm-1; the uncertainty recorded is that 0.6 cm-1 (0.0072 kJ/mol), and the conversion to 298 K adds one NIST does not list"}
+  - {id: acidity_ch3oh, quantity: acidity, species: CH3OH, value: 1597.0, uncertainty: 8.0, method: AVG, reference: "average of 6 values (no single reference)",
+     comment: "NIST row for the de-protonation reaction CH3O- + H+ = CH3OH"}
+
+  - {id: acidity_gibbs_hf,    quantity: acidity_gibbs, species: HF,    value: 1530.0, uncertainty: 0.75, method: H-TS, reference: "Blondel, Delsart, et al., 2001",
+     comment: "from the electron affinity 3.4011895(25) eV"}
+  - {id: acidity_gibbs_hcl,   quantity: acidity_gibbs, species: HCl,   value: 1372.8, uncertainty: 0.42, method: H-TS, reference: "Martin and Hepburn, 1998", comment: "gas phase"}
+  - {id: acidity_gibbs_ch3oh, quantity: acidity_gibbs, species: CH3OH, value: 1573.3, uncertainty: 2.6, method: H-TS, reference: "Nee, Osterwalder, et al., 2006", comment: "gas phase"}

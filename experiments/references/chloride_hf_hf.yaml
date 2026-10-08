@@ -1,7 +1,7 @@
 # Reference surface: chloride-hydrogen fluoride anion [Cl...H...F]- (Cl-H-F), hf/6-31+g*.
 # The fifth ASYMMETRIC reference in the multi-molecule calibration study, and the STRONG asymmetric anion: the counterpart of the mildly asymmetric
 # fluoride-methanol ion, as water-ammonia is of methanol-water and ammonia-methylamine. One fluoride of the symmetric bifluoride ion is swapped for
-# chloride. Fluoride is by far the stronger base (gas-phase acidities: HF ~1554, HCl ~1395 kJ/mol, a gap of ~1.65 eV), so the proton sits on the
+# chloride. Fluoride is by far the stronger base (NIST gas-phase acidities: HF 1555 +- 5, HCl 1394.9 kJ/mol, a gap of 160 +- 5 kJ/mol = 1.66 eV), so the proton sits on the
 # fluorine; the chlorine-side (donor) well is the higher one and exists only from Cl...F ~ 3.2 A, 1.7-2.1 eV higher (a single well below that).
 # The surface is NOT symmetric under exchanging donor and acceptor, so the full proton range is computed (no mirror symmetry) and the model's
 # diabatic offset is a free parameter in the fit. "Barrier" in the comparisons is measured from the donor-side (chlorine) well.
