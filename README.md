@@ -5,7 +5,7 @@
 **Propagate scientific models across scales, through one representation, with every hop documented and validated.**
 
 ![python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-429-brightgreen)
+![tests](https://img.shields.io/badge/tests-471-brightgreen)
 ![status](https://img.shields.io/badge/status-research%20prototype-orange)
 ![quantum chemistry](https://img.shields.io/badge/quantum%20chemistry-PySCF-6f42c1)
 
@@ -39,8 +39,10 @@ valence-bond model, fitted to one molecule at one level of theory, say anything 
   and how the fit predicts a distance it never saw. The fit's uncertainty is reported as *not* the model's error.
 - **A transfer study.** 21 real surfaces (7 molecules, 3 methods; three more built) with cross-prediction, downstream rates and isotope effects through the real chain,
   few-shot learning curves, a coupled-cluster benchmark, and a test of whether the finding survives pinning the bonds to the free diatomics.
+- **Checked against measurement.** NIST proton affinities and acidities are loaded with their uncertainty and citation, and the computed well gaps of the five asymmetric ions are compared with them, with the
+  separated fragments relaxed and the enthalpy at 298 K accounted for. Three ions agree to about 0.1 eV; one (fluoride–methanol) misses by 0.2–0.3 eV in the study's basis and agrees in aug-cc-pVTZ.
 - **Mission control.** A local web GUI over the same engines: edit any input and the whole chain re-runs, or explore the transfer study as a clickable matrix.
-- **Tested hard.** 429 tests, closed-form and independent checks, and mutation testing of the numerical code. Bugs found in my own work are listed, not hidden.
+- **Tested hard.** 471 tests, closed-form and independent checks, and mutation testing of the numerical code. Bugs found in my own work are listed, not hidden.
 
 ## Screenshots
 
@@ -88,7 +90,7 @@ pip install -e ".[dev]"
 
 python -m substrate run experiments/proton_transfer_pathway.yaml     # five scales, nine stages
 python -m substrate gui                                              # mission control, http://127.0.0.1:8765/
-pytest -m "not qc"                                                   # 365 tests, no PySCF needed (1.5–5 min)
+pytest -m "not qc"                                                   # 398 tests, no PySCF needed (1.5–5 min)
 ```
 
 An experiment is a YAML file. Naming only the destination scale is enough when the route is unambiguous, and a `sigma` turns an input into a Monte-Carlo draw through the whole chain:
@@ -128,6 +130,8 @@ minute and a half in a large basis, so those jobs are sent to the worker in smal
 | `python examples/transfer_across_molecules_and_methods.py` | The 21-reference study: every comparison (computes ~4,500 energies the first time) |
 | `python examples/anchoring_the_bonds.py` | Hold every bond at its free diatomic's value and refit all 24 surfaces |
 | `python examples/benchmark_bifluoride.py` | HF, B3LYP, MP2 and CCSD(T) in two basis sets on one grid (`--figure` draws the plot) |
+| `python examples/validate_against_nist.py` | The computed well gaps of the asymmetric ions against the measured proton-affinity differences (NIST): rigid, relaxed, and with the enthalpy at 298 K |
+| `python examples/basis_check_fluoride_methanol.py` | Why one ion misses its measured gap: B3LYP in three bases, MP2 and CCSD(T) in aug-cc-pVTZ, and the thermal term |
 | `python examples/pathway_isotope_effect.py` | When an isotope effect survives from the molecule to the pathway flux |
 | `python examples/enzyme_isotope_effects.py`, `molecular_vs_quantum.py`, `donor_acceptor_sweep.py` | Commitment regimes; the two routes to a rate; the barrier against heavy-atom distance |
 | `python -m substrate calibrate experiments/zundel_hf.yaml --out calibrated.yaml` | Fit the model to a real surface and write an experiment that runs in milliseconds |
@@ -545,6 +549,9 @@ The details, with every number and the predictions that failed, are in [docs/fin
   transfer no better: the coupling, the heavy-atom well and the offset, which decide the barrier, are what depends on the molecule and the method.
 - **A pair whose two bonds differ needs a curve of its own for each.** The chloride–hydrogen fluoride ion cannot be fitted with one Morse curve (0.41 eV); with `bonds: separate` it fits to 0.03–0.04 eV at HF, B3LYP and MP2,
   with equilibrium lengths near those of free HCl and HF.
+- **The surfaces mostly get the chemistry right, and one ion shows where they do not.** Against NIST's measured proton affinities and acidities, with every fragment relaxed and the enthalpy at 298 K accounted for, the computed
+  long-range well gap is within about 0.1 eV of the measured one for three of the five asymmetric ions at all three methods (over all five the mean error is +0.01 eV at B3LYP, +0.02 at MP2 and +0.15 at HF). Fluoride–methanol is 0.22–0.33 eV too large in the
+  study's 6-31+G* basis; in aug-cc-pVTZ it agrees with experiment within its uncertainty. That also corrects an earlier reading: the fitted offsets order with the surfaces' *computed* gaps, not the measured ones.
 - **The methods themselves disagree, in a known direction.** A CCSD(T) benchmark of the bifluoride ion puts HF's barrier too high and B3LYP's too low, and the study's own surfaces miss the CCSD(T)/aug-cc-pVTZ barrier at 2.74 Å by
   +0.19 (HF), −0.19 (B3LYP) and −0.14 eV (MP2), about a thousandfold in a rate at 300 K.
 
@@ -557,7 +564,7 @@ The details, with every number and the predictions that failed, are in [docs/fin
 
 Read [docs/limits.md](docs/limits.md); in brief:
 
-- The cheap model's parameters are **effective, not physical**: fitted couplings are 3–20 eV, and the fitted energy offset is 2–3× the real well gap at Hartree–Fock and larger still at B3LYP and MP2. A good fit shows flexibility, not that the model is right.
+- The cheap model's parameters are **effective, not physical**: fitted couplings are 3–20 eV, and the fitted energy offset is 1.1–1.9× the surface's own long-range well gap at Hartree–Fock and 1.8–4.6× at B3LYP and MP2. A good fit shows flexibility, not that the model is right.
 - The scans are **rigid, collinear and gas-phase**, with small basis sets. Against CCSD(T)/aug-cc-pVTZ for one ion, the study's barriers are off by 0.14–0.19 eV at 2.74 Å, which is far too much for absolute rates.
 - The study has **seven molecules, not twenty-one independent samples** (the methods of one molecule are correlated), and its ordering by "chemical distance" rests on two parent–derivative pairs.
 - That EVB parameters are system-specific is already known in the literature; the contribution here is measuring it carefully, with the failed predictions kept in.
@@ -565,7 +572,7 @@ Read [docs/limits.md](docs/limits.md); in brief:
 
 ## Validation
 
-429 tests: 365 run without PySCF (1.5–5 minutes), and 64 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
+471 tests: 398 run without PySCF (1.5–5 minutes), and 73 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
 
 - The two-state model equals the engine's diagonalisation to 1e-10; the closed-form calibration recovers a noise-free surface exactly and reports honest uncertainty on a noisy one.
 - The PySCF bridge is checked against physics: the variational principle and the Hartree–Fock limit, invariance under rigid motion, CCSD being exact for two electrons (so the triples correction vanishes),
@@ -583,11 +590,12 @@ src/substrate/
   translators/                                  the documented, validated hops between scales
   qc/                                           PySCF bridge: jobs, SQLite energy cache, a standalone worker that runs inside WSL
   calibration.py  transfer.py  diatomics.py     fit the model to a surface; cross-prediction and learning curves; free X–H Morse curves
+  datasets.py  data/  fragments.py              measured reference values (NIST proton affinities and acidities) with their provenance; a complex taken apart into its four fragments
   molecules.py                                  templates: Zundel, ammonium dimer, bifluoride, water–ammonia, methanol–water, ...
   gui/                                          the local web GUI: standard-library server, plain HTML/JS, no build step, no external requests
 experiments/                                    runnable experiment files; references/ (24 real surfaces) and benchmarks/ (8 bifluoride surfaces)
 examples/                                       the scripts in the table above
-tests/                                          429 tests
+tests/                                          471 tests
 docs/                                           architecture, science, findings, validation, limits, extending, images
 ```
 
@@ -607,7 +615,7 @@ docs/                                           architecture, science, findings,
 ```bash
 pip install -e ".[dev]"            # add ".[plots]" for the benchmark figure
 pytest                             # everything; tests marked `qc` need PySCF and skip without it
-pytest -m "not qc"                 # the 365 that do not
+pytest -m "not qc"                 # the 398 that do not
 ```
 
 ## Credits and license

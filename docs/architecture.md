@@ -38,12 +38,18 @@ and makes you name the route.
   subclass plus `register_backend`. `symmetric_eigh` is where a VQE solver would plug in. (The biophysical engine is small dense
   linear algebra and does not use the backend.)
 - **`qc/`: quantum-chemistry programs.** A second seam, for external codes that compute molecular energies. An engine describes
-  geometries as `QCJob`s (atoms, charge, spin, theory, basis); a `QCProgram` returns `QCResult`s. `PySCFProgram` runs PySCF
+  geometries as `QCJob`s (atoms, charge, spin, theory, basis, and a task: a single point; a `relax` that minimises the energy over every atom with analytic gradients and returns the relaxed geometry; or a `thermo` that relaxes tightly and adds the harmonic zero-point energy and the enthalpy at 298 K, for Hartree–Fock and DFT); a `QCProgram` returns `QCResult`s. `PySCFProgram` runs PySCF
   in-process if it is installed, or through a standalone worker (`pyscf_worker.py`, which imports nothing from substrate) in WSL, over a
   JSON protocol, in chunks so a crash loses at most one chunk. Energies are cached in SQLite by a content hash (geometry to 1e-8 Å,
   method, basis, charge, spin, program). A missing program raises `QCError`, deliberately *not* a `ValidationError`: an ensemble drops
   invalid draws, but it must stop for an environment failure. Non-convergence is reported through the result and becomes a
   `ValidationError`.
+- **`datasets.py` and `fragments.py`: measured reference values.** `datasets.py` loads curated tables of measured numbers
+  (`data/nist_ion_energetics.yaml`: gas-phase proton affinities and acidities from the NIST Chemistry WebBook) as `ReferenceValue`s that keep their unit
+  conversion, uncertainty, method and citation; `experimental_well_gap(template)` turns two of them into the measured energy difference between
+  the two wells of an asymmetric complex, and refuses to combine a proton affinity with an acidity. `fragments.py` takes such a complex apart into its four
+  separated fragments (each side with and without the proton) so a QC program can relax them or give them a thermochemical correction; together they let
+  `examples/validate_against_nist.py` put a computed gap beside the measured one.
 - **`gui/`: the local web GUI.** `app.py` is everything the GUI does without HTTP (list and run experiments, apply input edits, run long work as
   background jobs the page polls, assemble the transfer study and save it); `serialize.py` turns solved systems into JSON and decides which arrays
   are worth plotting at each scale (the server chooses what to show; the page only draws three generic plot types); `server.py` is a standard-library

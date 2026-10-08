@@ -21,7 +21,7 @@ gas-phase scans with small basis sets. None of it is a prediction of a real syst
 - Twelve correlated parameters (asymmetric surface, separate bonds) fit a few hundred points to 0.01–0.06 eV. A good rmse shows flexibility,
   not that the model is right.
 - Fitted couplings are 3–20 eV and fitted energy offsets are −0.8 to −5.4 eV for the asymmetric ions at HF (and run to the −10 eV bound for
-  chloride–HF at B3LYP and MP2); real diabatic couplings are far smaller and the real well gap is 1–2 eV. These are effective parameters. The offset of the chloride–HF ion sits on its −10 eV bound at B3LYP and MP2 and trades off against a
+  chloride–HF at B3LYP and MP2); real diabatic couplings are far smaller and the measured long-range well gaps are 0.4–1.7 eV. These are effective parameters. The offset of the chloride–HF ion sits on its −10 eV bound at B3LYP and MP2 and trades off against a
   coupling of 17–20 eV along a long valley (with the bounds moved out it reaches −33 eV for B3LYP at 0.002 eV better rmse, in a nearly singular
   fit): not a number to compare between ions.
 - The bond lengths and widths *are* physical (within a few percent of the free diatomics), but pinning them there does not help: with the
@@ -52,19 +52,24 @@ gas-phase scans with small basis sets. None of it is a prediction of a real syst
   three chloride–HF surfaces are built and tested but not yet in the study). That is **seven molecules, not twenty-one independent samples**: the
   methods of one molecule are strongly correlated, so the pair counts (420 pairs, 89 worse than a constant guess) describe the set, not a
   population.
-- The proton-affinity gaps are ~0.4 (an anion), ~0.47, ~0.65 and ~1.7 eV. Two of the four asymmetric molecules are one-methyl derivatives of a
+- The measured proton-affinity gaps (NIST WebBook) are 0.44 ± 0.09 (an anion), 0.47, 0.66 and 1.69 eV for the four asymmetric molecules in the study,
+  and 1.66 eV for chloride–HF (not yet in it). **The surfaces do not all reproduce them**: with the separated fragments relaxed and the enthalpy at 298 K
+  accounted for, the computed long-range gap is within about 0.1 eV of the measured one for ammonia–methylamine, methanol–water and water–ammonia at
+  all three methods and for chloride–HF at B3LYP, but 0.22–0.33 eV too large for fluoride–methanol at every method (the 6-31+G* basis is the main cause:
+  at B3LYP the gap falls from 0.83 to 0.66 eV in aug-cc-pVTZ) and 0.29 eV too large (HF) and 0.22 eV too small (MP2) for chloride–HF ([findings](findings.md)). Two of the four asymmetric molecules are one-methyl derivatives of a
   symmetric parent, so the observation that transfer follows chemical distance (0.27–0.38 eV of error per eV of proton-affinity gap) rests on two
   derivatives, and there is no MP2 ammonium dimer. It is an observation, not a law.
 - The asymmetric fits' energy offset is an effective parameter: water–ammonia −2.1, −4.7 and −3.5 eV, methanol–water −1.7, −3.6 and −2.6,
   ammonia–methylamine −0.8, −1.5 and −1.1, fluoride–methanol −1.6, −3.7 and −3.1 eV at HF, B3LYP and MP2 (it varies 1.8–2.3× between methods).
   Across the three cations it is ordered as the proton-affinity gaps but its ratios (1.3–1.4, 2.0–2.4, 2.5–3.2) do not track the ratios of the gaps
-  (~1.4, ~2.6, ~3.6), and the anion, with a gap of ~0.4 eV, has an offset as large as methanol–water's.
+  (~1.4, ~2.6, ~3.6), and the anion, with a measured gap of ~0.4 eV, has an offset as large as methanol–water's, because its surface's own long-range gap is
+  1.1–1.2 eV (0.8–0.95 relaxed), larger than methanol–water's 0.8–0.9 eV: the offsets order with the *computed* gaps, to within the fit's uncertainty, and are 1.1–4.6× them.
 - The fit window is a declared decision, not a derived one (2.5 eV misses the HF barrier top at 3.4 Å, 2.7 eV; at 3.5 eV the fit's error over its own,
   larger window is 0.059 eV).
 - The energy zero is fitted on the target when transferring, which flatters the transfer. The rate comparison is at one temperature and at
   distances chosen from the target's own barrier. The learning curves use one fixed split and three prior widths.
-- Two predictions failed and are recorded: the offset of fluoride–methanol was expected to be smaller than ammonia–methylamine's, and the nearest
-  neighbour of chloride–HF was expected to be the bifluoride.
+- Two predictions failed and are recorded: the offset of fluoride–methanol was expected to be smaller than ammonia–methylamine's (it was made from the
+  *measured* gap, which the study's surface does not have), and the nearest neighbour of chloride–HF was expected to be the bifluoride.
 - The finding that parameters do not transfer is consistent with what the empirical-valence-bond literature already says (parameters are fitted
   per reaction). The contribution here is measuring it carefully, not discovering it.
 
