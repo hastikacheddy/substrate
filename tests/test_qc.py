@@ -308,3 +308,31 @@ def test_experiment_files_can_carry_a_molecule(tmp_path):
         "    parameters:\n      scan_distance: {value: 2.8, unit: angstrom}\n  propagation: [electronic_structure]\n")
     exp = load_experiment(path)
     assert exp.system.structure["method"]["basis"] == "sto-3g" and exp.system.parameters["scan_distance"].value == 2.8
+
+
+# -- coupled cluster costs minutes a point, so its jobs travel in small chunks -----------------------------------------------------------
+class _Counting(QCProgram):
+    name = "counting"
+
+    def __init__(self):
+        self.sizes = []
+
+    def compute(self, jobs):
+        self.sizes.append(len(jobs))
+        return [QCResult(-1.0, True) for _ in jobs]
+
+
+def _hydrogen_molecules(theory, n, start=0):
+    return [QCJob((("H", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.5 + 0.01 * i)), 0, 0, theory, "6-31g") for i in range(start, start + n)]
+
+
+def test_coupled_cluster_jobs_are_sent_in_chunks_of_six_and_cheap_ones_in_chunks_of_forty(tmp_path):
+    cache = QCCache(tmp_path / "c.sqlite3")
+    for theory, n, expected in (("ccsd(t)", 14, [6, 6, 2]), ("CCSD", 7, [6, 1]), ("hf", 85, [40, 40, 5]), ("mp2", 41, [40, 1])):
+        program = _Counting()
+        results, run, cached = compute_cached(program, _hydrogen_molecules(theory, n), cache)
+        assert (program.sizes, run, cached) == (expected, n, 0), theory
+    program = _Counting()                                                       # one coupled-cluster job makes the whole request small-chunked
+    compute_cached(program, _hydrogen_molecules("hf", 9, start=500) + _hydrogen_molecules("ccsd(t)", 1, start=500), cache)
+    assert program.sizes == [6, 4] and max(program.sizes) <= 6
+    assert _hydrogen_molecules("ccsd(t)", 1)[0].key("p") != _hydrogen_molecules("ccsd", 1)[0].key("p")        # the two never share a cached energy

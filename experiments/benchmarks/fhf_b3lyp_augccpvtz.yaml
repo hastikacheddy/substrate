@@ -1,0 +1,31 @@
+# Benchmark surface: bifluoride FHF- (F-H-F), dft:b3lyp/aug-cc-pvtz.
+# Not a reference in the transfer study: these eight files hold the SAME rigid-group scan grid at four levels of theory and two basis sets, so
+# each method's error can be read against coupled cluster, and the effect of the basis separately from the effect of the method. The grid is
+# every second distance of the study's (R = 2.10, 2.26, ..., 2.90 A, and the same 21 proton positions), so the 6-31+G* energies of
+# HF, B3LYP and MP2 are the study's own, read from the cache. All-electron: MP2 and coupled cluster correlate every electron.
+experiment:
+  id: BENCH-fhf_b3lyp_augccpvtz
+  phenomenon: proton_transfer_benchmark
+
+  system:
+    name: bifluoride FHF- (F-H-F), dft:b3lyp/aug-cc-pvtz
+    scale: electronic_structure
+    kind: electronic.qc_scan_2d
+
+    structure:
+      molecule: {template: bifluoride_anion}
+      method: {theory: dft:b3lyp, basis: aug-cc-pvtz, program: pyscf}
+      scan: {mirror_symmetric: true}      # the ion is symmetric under exchanging donor and acceptor; verified numerically
+
+    parameters:
+      scan_distance:   {value: 2.74, unit: angstrom}       # on the grid, so the rigid slice costs no extra energies
+      x_extent:        {value: 0.7, unit: angstrom}
+      distance_min:    {value: 2.1, unit: angstrom}
+      distance_max:    {value: 2.9, unit: angstrom}
+      n_x:             {value: 21, unit: "1"}
+      n_r:             {value: 6, unit: "1"}
+      particle_mass:   {value: 1.007276, unit: amu}
+      heavy_atom_mass: {value: 18.9984, unit: amu}
+      temperature:     {value: 300, unit: K}
+
+  propagation: [electronic_structure]

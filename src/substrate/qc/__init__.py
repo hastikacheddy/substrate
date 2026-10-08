@@ -34,6 +34,13 @@ from ..errors import QCError, QCUnavailableError
 #: bump when the meaning of a cached energy changes (new convergence settings, a bug fix, ...)
 CACHE_VERSION = 1
 CHUNK = 40                                  # jobs per worker process: bounds what a crash or timeout can lose
+CC_CHUNK = 6                                # the same for coupled cluster, whose points cost minutes: a chunk must fit in the worker timeout
+
+
+def chunk_size(jobs: Sequence["QCJob"]) -> int:
+    """Jobs per worker process: small when any job is coupled cluster (about a minute or more each), so a chunk finishes inside the
+    timeout and a failure loses little."""
+    return CC_CHUNK if any(job.theory.lower().startswith("ccsd") for job in jobs) else CHUNK
 
 
 @dataclass(frozen=True)
@@ -127,8 +134,9 @@ def compute_cached(program: QCProgram, jobs: Sequence[QCJob], cache: QCCache | N
     have = cache.get_many(list(set(keys)))
     missing: dict[str, QCJob] = {k: j for k, j in zip(keys, jobs) if k not in have}
     n_cached = len(set(keys)) - len(missing)
-    for start in range(0, len(missing), CHUNK):
-        chunk = list(missing.items())[start:start + CHUNK]
+    size = chunk_size(list(missing.values()))
+    for start in range(0, len(missing), size):
+        chunk = list(missing.items())[start:start + size]
         results = program.compute([job for _, job in chunk])
         if len(results) != len(chunk):
             raise QCError(f"{program.name} returned {len(results)} results for {len(chunk)} jobs")

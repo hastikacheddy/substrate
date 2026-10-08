@@ -15,7 +15,7 @@ Structure (non-numeric configuration):
     molecule: {atoms: [[symbol, x, y, z], ...],  donor, acceptor, proton: atom indices,
                donor_group, acceptor_group: indices of the atoms that travel with each heavy atom,
                charge, spin (2S)}
-    method:   {theory: hf | mp2 | dft:<functional>,  basis: <basis name>,  program: pyscf}
+    method:   {theory: hf | mp2 | ccsd | ccsd(t) | dft:<functional>,  basis: <basis name>,  program: pyscf}
     scan:     {mirror_symmetric: true}    # E(x, R) = E(-x, R): compute x >= 0 only (checked, not assumed)
 
 The reference geometry must have the donor, proton and acceptor on the z axis with the donor at lower z.

@@ -6,13 +6,19 @@ Runs wherever PySCF is installed, including a Linux environment reached through 
     job:    {"id", "atoms": [[symbol, x, y, z], ...] (angstrom), "charge", "spin" (2S), "theory", "basis"}
     result: {"id", "energy" (hartree), "converged", "homo_lumo_gap" (hartree), "seconds"}   or   {"id", "error"}
 
-theory is "hf", "mp2", or "dft:<functional>" (e.g. "dft:b3lyp"); open-shell systems (spin > 0) use the unrestricted variants.
+theory is "hf", "mp2", "ccsd", "ccsd(t)" or "dft:<functional>" (e.g. "dft:b3lyp"); open-shell systems (spin > 0) use the unrestricted
+variants of Hartree-Fock, MP2 and DFT. Coupled cluster is closed-shell only (an open-shell job is refused, not approximated). MP2 and
+coupled cluster correlate every electron (no frozen core), so the methods differ only in how they treat correlation. A coupled-cluster
+energy is reported as not converged unless both the SCF and the CCSD iterations converged.
 """
 from __future__ import annotations
 
 import json
 import sys
 import time
+
+
+COUPLED_CLUSTER = ("ccsd", "ccsd(t)")
 
 
 def _orbital_gap(mf) -> float | None:
@@ -37,26 +43,37 @@ def run_job(job: dict) -> dict:
     )
     theory = job["theory"].lower()
     open_shell = mol.spin != 0
+    if theory in COUPLED_CLUSTER and open_shell:
+        raise ValueError(f"'{job['theory']}' is implemented for closed-shell systems only (spin {mol.spin})")
     if theory.startswith("dft:"):
         mf = (dft.UKS if open_shell else dft.RKS)(mol)
         mf.xc = theory[4:]
-    elif theory in ("hf", "mp2"):
+    elif theory in ("hf", "mp2", *COUPLED_CLUSTER):
         mf = (scf.UHF if open_shell else scf.RHF)(mol)
     else:
-        raise ValueError(f"unknown theory '{job['theory']}' (use 'hf', 'mp2' or 'dft:<functional>')")
+        raise ValueError(f"unknown theory '{job['theory']}' (use 'hf', 'mp2', 'ccsd', 'ccsd(t)' or 'dft:<functional>')")
     mf.conv_tol = 1e-10
     mf.kernel()
     if not mf.converged:                                  # second-order SCF is slower but far more robust
         mf = mf.newton()
         mf.kernel()
-    energy = mf.e_tot
+    energy, converged = mf.e_tot, bool(mf.converged)
     if theory == "mp2" and mf.converged:
         from pyscf import mp
         correlated = mp.UMP2(mf) if open_shell else mp.MP2(mf)
         correlated.kernel()
         energy = correlated.e_tot
+    elif theory in COUPLED_CLUSTER and mf.converged:
+        from pyscf import cc
+        correlated = cc.CCSD(mf)
+        correlated.conv_tol = 1e-9
+        correlated.kernel()
+        converged = bool(correlated.converged)
+        energy = correlated.e_tot
+        if theory == "ccsd(t)" and converged:
+            energy += correlated.ccsd_t()                    # the perturbative triples correction
     return {
-        "id": job["id"], "energy": float(energy), "converged": bool(mf.converged),
+        "id": job["id"], "energy": float(energy), "converged": converged,
         "homo_lumo_gap": _orbital_gap(mf), "seconds": time.perf_counter() - started,
     }
 

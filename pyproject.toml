@@ -11,6 +11,7 @@ dependencies = ["numpy>=1.24", "scipy>=1.10", "pyyaml>=6"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+plots = ["matplotlib>=3.7"]          # only for the benchmark figure in examples/benchmark_bifluoride.py
 
 [project.scripts]
 substrate = "substrate.cli:main"

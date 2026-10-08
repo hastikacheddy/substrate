@@ -41,6 +41,8 @@ def energy(atoms, charge=0, spin=0, theory="hf", basis="cc-pvdz"):
 
 
 WATER = [("O", 0.0, 0.0, 0.1173), ("H", 0.0, 0.7572, -0.4692), ("H", 0.0, -0.7572, -0.4692)]
+HELIUM = [("He", 0.0, 0.0, 0.0)]
+H2 = [("H", 0.0, 0.0, 0.0), ("H", 0.0, 0.0, 0.7414)]
 
 
 # -- the program, against physics ---------------------------------------------------------------------------------------
@@ -69,6 +71,38 @@ def test_electron_correlation_lowers_the_energy_and_other_methods_differ():
 def test_an_unknown_theory_is_an_error_not_a_silent_default():
     with pytest.raises(QCError, match="unknown theory"):
         energy(WATER, theory="magic")
+
+
+# -- coupled cluster: CCSD and CCSD(T) ---------------------------------------------------------------------------------------------------
+def test_coupled_cluster_is_exact_for_two_electrons_so_the_triples_vanish_and_the_exact_energy_is_a_bound():
+    """CCSD is full CI for two electrons, so there are no triple excitations: CCSD(T) equals CCSD, and the energy is variational against
+    the exact non-relativistic energy (He -2.903724, H2 -1.174476 hartree) while recovering most of the correlation beyond the HF limit."""
+    for atoms, exact, hf_limit in ((HELIUM, -2.903724, -2.861680), (H2, -1.174476, -1.133629)):
+        ccsd, triples = energy(atoms, theory="ccsd", basis="cc-pvtz"), energy(atoms, theory="ccsd(t)", basis="cc-pvtz")
+        assert ccsd.converged and triples.converged
+        assert triples.energy_hartree == pytest.approx(ccsd.energy_hartree, abs=1e-9)
+        assert exact < triples.energy_hartree < hf_limit - 0.03
+
+
+def test_the_triples_correction_is_negative_and_of_the_expected_size_for_water():
+    hf, mp2 = energy(WATER).energy_hartree, energy(WATER, theory="mp2").energy_hartree
+    ccsd, triples = energy(WATER, theory="ccsd"), energy(WATER, theory="ccsd(t)")
+    assert ccsd.converged and triples.converged
+    assert -0.006 < triples.energy_hartree - ccsd.energy_hartree < -0.0015          # about -0.003 hartree: a small, negative correction
+    assert triples.energy_hartree < ccsd.energy_hartree < hf
+    assert abs(triples.energy_hartree - mp2) < 0.03                               # MP2 and CCSD(T) give correlation energies within ~10% of each other
+
+
+def test_coupled_cluster_refuses_an_open_shell_system_instead_of_approximating_it():
+    with pytest.raises(QCError, match="closed-shell"):
+        energy([("H", 0, 0, 0)], spin=1, theory="ccsd(t)", basis="cc-pvtz")
+
+
+def test_recorded_bifluoride_coupled_cluster_energies_guard_against_a_change_in_the_program():
+    """Recorded with PySCF 2.14.0, not an independent reference: all-electron CCSD and CCSD(T)/6-31+G* for FHF- at F...F 2.7 A, the proton at the centre."""
+    fhf = [("F", 0, 0, -1.35), ("F", 0, 0, 1.35), ("H", 0, 0, 0.0)]
+    assert energy(fhf, charge=-1, theory="ccsd", basis="6-31+g*").energy_hartree == pytest.approx(-199.87099744, abs=1e-6)
+    assert energy(fhf, charge=-1, theory="ccsd(t)", basis="6-31+g*").energy_hartree == pytest.approx(-199.87929693, abs=1e-6)
 
 
 # -- the Zundel cation: a real proton-transfer surface ---------------------------------------------------------------------
