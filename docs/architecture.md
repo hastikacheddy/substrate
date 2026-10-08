@@ -2,6 +2,9 @@
 
 [← back to the README](../README.md)
 
+The diagrams (system context, scales and kinds, the lifecycle of a run, the core types, the quantum-chemistry bridge, the model, calibration and transfer, and the GUI) are in the
+[Architecture section of the README](../README.md#architecture). This page is the prose behind them.
+
 ## Two routes from a surface to a rate
 
 Two real, tested routes from an electronic surface to a rate, which **make different approximations and are not

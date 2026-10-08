@@ -133,25 +133,403 @@ minute and a half in a large basis, so those jobs are sent to the worker in smal
 | `python -m substrate calibrate experiments/zundel_hf.yaml --out calibrated.yaml` | Fit the model to a real surface and write an experiment that runs in milliseconds |
 | `python -m substrate transfer experiments/references/*.yaml` | Cross-prediction of any set of reference surfaces from the command line |
 
-## How it works
+## Architecture
+
+Two views. The **high-level** diagrams show what the pieces are and how the scales connect. The **low-level** diagrams show what happens inside a run, the
+core types, the quantum-chemistry bridge, the model itself, the studies built on it, and the GUI. File names are under `src/substrate/`; the text is in
+[docs/architecture.md](docs/architecture.md) and [docs/science.md](docs/science.md).
+
+### High level
+
+#### System context
+
+What goes in, what the core does with it, and what talks to what.
+
+```mermaid
+flowchart TB
+    subgraph INPUTS["Inputs"]
+        YAML["Experiment file (YAML)<br/>system, propagation, ensemble,<br/>calibration hints"]
+        MOL["Molecule templates<br/>Zundel, bifluoride, chloride-HF, ..."]
+    end
+
+    subgraph CORE["Core"]
+        EXP["experiment.py<br/>parse and validate"]
+        PIPE["Pipeline and Workflow<br/>plan, execute, ensembles"]
+        REG["Registry<br/>engines by (scale, kind)<br/>translator routing"]
+        ENG["Engines<br/>solve one scale and kind"]
+        TRN["Translators<br/>approximations and validate()"]
+        IR["Scientific IR<br/>ScientificSystem, Quantity,<br/>provenance chain"]
+        BK["SolverBackend<br/>eigensolvers and ODE<br/>(classical today)"]
+    end
+
+    subgraph QCB["Quantum-chemistry bridge (qc/)"]
+        CACHE[("SQLite energy cache<br/>keyed by content")]
+        WRK["PySCF worker<br/>in-process or inside WSL"]
+    end
+
+    subgraph STUDIES["Studies"]
+        CAL["calibration.py<br/>fit the model to a surface"]
+        TRF["transfer.py<br/>cross-prediction, rates,<br/>learning curves"]
+        DIA["diatomics.py<br/>free X-H Morse curves"]
+    end
+
+    subgraph FRONT["Interfaces and outputs"]
+        CLI["Command line<br/>run, calibrate, transfer, gui"]
+        GUI["Mission control<br/>local web GUI"]
+        RES["RunResult<br/>one JSON system per stage,<br/>with provenance"]
+    end
+
+    YAML --> EXP
+    MOL --> EXP
+    EXP --> PIPE
+    PIPE --> REG
+    REG --> ENG
+    REG --> TRN
+    ENG --- IR
+    TRN --- IR
+    ENG --> BK
+    ENG -->|"qc_scan_2d"| CACHE
+    CACHE <-->|"missing points"| WRK
+    PIPE --> RES
+    CLI --> PIPE
+    GUI --> PIPE
+    CLI --> CAL
+    CLI --> TRF
+    GUI --> TRF
+    TRF --> CAL
+    DIA --> CAL
+    CAL -->|"reference surfaces, calibrated models"| PIPE
+    TRF -->|"real and model chains"| PIPE
+```
+
+#### Scales, kinds and translators
+
+Engines are keyed by `(scale, kind)` and translators accept particular kinds, so a chain is found kind-aware. Each arrow is a translator: a written list of
+approximations plus a `validate()` that checks them against the actual numbers.
 
 ```mermaid
 flowchart LR
-    E["<b>electronic structure</b><br/>valence-bond model · PySCF"] --> Q["<b>quantum</b><br/>1D nuclear dynamics, tunnelling"]
-    E --> M["<b>molecular</b><br/>relaxed paths, normal modes, TST"]
-    Q --> R["<b>reaction</b><br/>mass-action kinetics"]
-    M --> R
-    R --> P["<b>biophysical</b><br/>enzyme cycle"]
-    P --> B["<b>biological</b><br/>metabolic network, control analysis"]
+    subgraph ES["electronic structure"]
+        EVB1["evb_two_state<br/>1D model"]
+        EVB2["evb_two_state_2d<br/>2D model"]
+        QCS["qc_scan_2d<br/>real PySCF energies"]
+    end
+    subgraph QU["quantum"]
+        DW["double_well_1d"]
+        TAB["tabulated_1d"]
+    end
+    subgraph MO["molecular"]
+        TRI["collinear_triatomic"]
+    end
+    subgraph RE["reaction"]
+        NET["reaction.network<br/>mass-action ODE"]
+    end
+    subgraph BP["biophysical"]
+        ENZ["enzyme_cycle"]
+    end
+    subgraph BI["biological"]
+        PATH["metabolic_network"]
+    end
+
+    EVB1 -->|ElectronicToQuantum| TAB
+    EVB2 -->|ElectronicToQuantum| TAB
+    QCS -->|ElectronicToQuantum| TAB
+    EVB2 -->|ElectronicToMolecular| TRI
+    QCS -->|ElectronicToMolecular| TRI
+    TAB -->|QuantumToReaction| NET
+    DW -->|QuantumToReaction| NET
+    TRI -->|MolecularToReaction| NET
+    NET -->|ReactionToEnzyme| ENZ
+    ENZ -->|BiophysicalToPathway| PATH
 ```
 
-- **Engines** solve a system of one scale and *kind*; **translators** map a solved system to an unsolved one of the next scale and say what they assumed. The registry finds chains kind-aware.
-- **Two routes from an electronic surface to a rate** make different approximations (a relaxed classical proton against a frozen heavy-atom distance with tunnelling) and are not interchangeable;
-  dividing one by the other to get a "tunnelling factor" is wrong by four orders of magnitude at the defaults.
-- **Seams for other hardware and codes**: a `SolverBackend` (eigensolvers, ODE integration) where a GPU or quantum backend would plug in, and a `QCProgram` seam for external quantum-chemistry codes.
-- **Uncertainty** is propagated by re-running the whole chain per draw; parameters from a calibration are drawn *jointly* from their covariance, because treating them as independent inflates the rate uncertainty 30×.
+- **Two routes make different physics.** From a 2D electronic kind to `reaction` two chains tie for shortest, one through `quantum` (the proton is quantum, the heavy atoms
+  are frozen) and one through `molecular` (relaxed heavy atoms, a classical proton). The registry raises `AmbiguousPathError` instead of picking one; name the
+  intermediate scales in `propagation` to choose. Dividing one route's rate by the other's to get a "tunnelling factor" is wrong by four orders of magnitude at the defaults.
+- `quantum.double_well_1d` is a starting kind only: nothing translates into it, so a chain can begin there.
+- **Seams for other hardware and codes**: a `SolverBackend` (eigensolvers, ODE integration) where a GPU or quantum backend would plug in, and a `QCProgram` for external quantum-chemistry codes.
+- **Uncertainty** is propagated by re-running the whole chain per draw. Parameters from a calibration are drawn *jointly* from their covariance, because treating them as independent inflates the rate uncertainty 30×.
 
-More: [architecture](docs/architecture.md) · [the implemented science, scale by scale](docs/science.md) · [adding a scale or a model](docs/extending.md).
+### Low level
+
+#### A run, step by step
+
+`Pipeline.run` plans the chain, executes it as a DAG of solve and translate tasks, writes a provenance record for every product, and optionally repeats the whole chain per
+uncertainty draw.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Caller (CLI, GUI or script)
+    participant P as Pipeline
+    participant R as Registry
+    participant W as Workflow
+    participant E as Engine
+    participant T as Translator
+
+    U->>P: run(root system, propagation, n_samples, seed)
+    P->>R: plan with engine_for(scale, kind) and find_path(here, there, kind)
+    R-->>P: ordered steps, or AmbiguousPathError / NoPathError
+    P->>W: one task per step, each depending on the previous one
+
+    loop every step in order
+        alt a solve step
+            W->>E: solve(system, backend)
+            E-->>W: the system with its observables filled in
+        else a translate step
+            W->>T: validate(system)
+            T-->>W: issues (an error stops the run, a warning is recorded)
+            W->>T: translate(system)
+            T-->>W: an unsolved system of the next scale, context parameters carried over
+        end
+        W->>W: append a ProvenanceRecord (fingerprints, approximations, warnings, seconds)
+    end
+
+    W-->>P: the trace, one system per step
+
+    opt n_samples greater than 0
+        P->>P: draw the root parameters (independent Gaussians or a joint covariance)
+        P->>W: re-run the whole chain for each draw (a draw that fails validation is dropped)
+        P->>P: attach the spread and a 68 percent band to every derived quantity
+    end
+
+    P-->>U: RunResult (trace, steps, ensemble information)
+```
+
+#### Core types
+
+The Scientific IR, the contracts between components, and the two seams (numerical backend, quantum-chemistry program). Concrete engines and translators subclass
+`Engine` and `Translator`; there is one per scale and kind in the diagram above.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class ScientificSystem {
+        +name
+        +scale
+        +kind
+        +parameters
+        +state
+        +observables
+        +structure
+        +dynamics
+        +provenance
+        +param()
+        +obs()
+        +fingerprint()
+        +evolve()
+    }
+    class Quantity {
+        +value
+        +unit
+        +sigma
+        +band
+        +source
+    }
+    class ProvenanceRecord {
+        +step
+        +name
+        +input_fingerprint
+        +output_fingerprint
+        +backend
+        +approximations
+        +warnings
+        +seconds
+    }
+    class Engine {
+        <<abstract>>
+        +name
+        +scale
+        +kinds
+        +approximations
+        +solve()
+    }
+    class Translator {
+        <<abstract>>
+        +name
+        +source
+        +target
+        +target_kind
+        +source_kinds
+        +approximations
+        +validate()
+        +translate()
+    }
+    class Registry {
+        +register_engine()
+        +register_translator()
+        +engine_for()
+        +find_path()
+    }
+    class Pipeline {
+        +plan()
+        +run()
+    }
+    class Workflow {
+        +add()
+        +run()
+    }
+    class RunResult {
+        +trace
+        +steps
+        +ensemble
+        +final
+        +save()
+    }
+    class SolverBackend {
+        <<abstract>>
+        +lowest_eigenpairs()
+        +symmetric_eigh()
+        +integrate_ode()
+    }
+    class ClassicalBackend
+    class QCProgram {
+        <<abstract>>
+        +compute()
+    }
+    class PySCFProgram
+
+    ScientificSystem "1" *-- "many" Quantity
+    ScientificSystem "1" *-- "many" ProvenanceRecord
+    Registry o-- Engine
+    Registry o-- Translator
+    Pipeline --> Registry
+    Pipeline --> SolverBackend
+    Pipeline ..> Workflow : builds a DAG
+    Pipeline ..> RunResult : returns
+    Engine ..> SolverBackend : uses
+    Engine ..> ScientificSystem : solves
+    Translator ..> ScientificSystem : maps
+    Engine ..> QCProgram : QCScanEngine only
+    SolverBackend <|-- ClassicalBackend
+    QCProgram <|-- PySCFProgram
+```
+
+#### The quantum-chemistry bridge
+
+How a real surface is computed and cached. Every energy is stored by a content hash (geometry to 1e-8 Å, method, basis, charge, spin, program), so a rerun, and every draw of an
+ensemble, reads from disk; only converged energies are kept.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as QCScanEngine
+    participant C as compute_cached
+    participant DB as QCCache (SQLite)
+    participant P as PySCFProgram
+    participant W as pyscf_worker
+
+    S->>S: build_geometry for every (x, R) of the grid (half of it when mirror symmetric)
+    S->>C: jobs (atoms, charge, spin, theory, basis)
+    C->>DB: get_many(content hash of every job)
+    DB-->>C: the energies already known
+
+    loop chunks of the missing jobs (40, or 6 for CCSD and CCSD(T))
+        C->>P: compute(chunk)
+        P->>W: jobs as JSON on stdin inside WSL, or a direct call where PySCF is installed
+        W->>W: SCF, then MP2, CCSD or CCSD(T) if asked
+        W-->>P: one result per job (energy, converged, HOMO-LUMO gap)
+        P-->>C: results
+        C->>DB: put_many(converged results only)
+    end
+
+    C-->>S: results, number computed, number cached
+    S->>S: refuse non-converged points and verify a declared mirror symmetry
+    S->>S: assemble E(x, R) in eV above the minimum, the rigid slice and the gap
+```
+
+#### The two-state model
+
+The cheap model that stands in for real chemistry. The acceptor bond uses the donor's Morse parameters unless `acceptor_morse_*` are given (the separate-bond model).
+Diagonalising the 2×2 Hamiltonian gives the ground-state surface the nuclei move on.
+
+```mermaid
+flowchart LR
+    X["proton position x<br/>heavy-atom distance R"] --> RAB["r_A = R/2 + x<br/>r_B = R/2 - x"]
+    RAB --> VA["V_A = Morse of r_A<br/>depth, width, r_eq"]
+    RAB --> VB["V_B = Morse of r_B + offset<br/>acceptor curve: its own parameters,<br/>or the donor's"]
+    X --> DL["coupling Δ(R)<br/>Δ0 exp(-β (R - R0))"]
+    VA --> H["2x2 Hamiltonian<br/>V_A and V_B on the diagonal,<br/>Δ off the diagonal"]
+    VB --> H
+    DL --> H
+    H --> E0["ground state E0<br/>the lower eigenvalue"]
+    X --> VOO["V_OO(R)<br/>Morse in the heavy-atom distance"]
+    E0 --> SUM["E(x, R) = E0 + V_OO(R)"]
+    VOO --> SUM
+    SUM --> O1["surface E(x, R)"]
+    SUM --> O2["rigid slice at scan_distance"]
+    H --> O3["electronic character and gap"]
+```
+
+#### Calibration and transfer
+
+Fit the model to a real surface, then ask whether the fit says anything about another surface. Every comparison keeps the energy zero as its only freedom.
+
+```mermaid
+flowchart TB
+    REF["Reference surface<br/>solved qc_scan_2d system:<br/>surface_x, surface_r, surface_energy"]
+    ANC["diatomics.anchored_bounds<br/>(optional) hold the bonds<br/>at the free diatomics' values"]
+    SET["FitSettings<br/>window, sigma, bounds, priors,<br/>reference distance, bond model"]
+    FIT["calibrate_evb_2d<br/>weighted least squares,<br/>12 multi-starts"]
+    CAL["Calibration<br/>parameters and covariance,<br/>pinned and poorly determined,<br/>wells and barrier per distance,<br/>leave-one-distance-out"]
+    SYS["Calibration.system()<br/>a model system with a joint covariance:<br/>runs through the Pipeline in milliseconds"]
+    RFO["Reference<br/>surface, calibration, fit window"]
+    XP["cross_predict<br/>one calibration on another surface,<br/>best constant shift only"]
+    RT["rate_comparison<br/>the real chain against the model chain<br/>at barrier-defined distances"]
+    LC["learning_curve<br/>k distances plus a Gaussian prior<br/>from another calibration"]
+    PT["parameter_table and baselines<br/>spread across references,<br/>what a constant guess scores"]
+    OUT["Matrix, tables and curves<br/>in the CLI report and the GUI"]
+
+    REF --> FIT
+    SET --> FIT
+    ANC -.-> SET
+    FIT --> CAL
+    CAL --> SYS
+    REF --> RFO
+    CAL --> RFO
+    RFO --> XP
+    RFO --> RT
+    RFO --> LC
+    RFO --> PT
+    XP --> OUT
+    RT --> OUT
+    LC --> OUT
+    PT --> OUT
+```
+
+#### Mission control
+
+The GUI is a thin local web app over the same engines: the server chooses what to show, the page only draws.
+
+```mermaid
+flowchart LR
+    B["Browser<br/>static HTML, CSS and JS<br/>no build step, no external requests"]
+    subgraph SRV["gui/server.py"]
+        H["Handler<br/>Host and Origin checks, JSON-only POST,<br/>strict Content-Security-Policy,<br/>serves static files by exact name"]
+    end
+    A["gui/app.py: App<br/>list and run experiments,<br/>transfer study, saved results"]
+    J["JobManager<br/>background jobs the page polls"]
+    PL["Pipeline<br/>experiments with edited inputs"]
+    TS["transfer study<br/>references, matrix, rates,<br/>learning curves"]
+    SV[("saved results<br/>keyed by file content hash")]
+    QD[("QC energy cache")]
+    SER["gui/serialize.py<br/>JSON, and which plots to draw<br/>at each scale"]
+
+    B <-->|"JSON over HTTP, 127.0.0.1 only"| H
+    H --> A
+    A --> J
+    A --> PL
+    A --> TS
+    TS --> SV
+    TS --> QD
+    PL --> SER
+    TS --> SER
+    SER --> H
+```
+
+The API the page uses: `GET /api/status`, `/api/experiments`, `/api/experiment`, `/api/job`, `/api/references`, `/api/transfer` and `POST /api/run`, `/api/transfer/run`,
+`/api/transfer/rates`, `/api/transfer/learning`. Experiment paths are resolved so they cannot leave `experiments/`.
 
 ## What it found
 
