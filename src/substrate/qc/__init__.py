@@ -30,7 +30,7 @@ import sys
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable, Sequence
 
 from ..errors import QCError, QCUnavailableError, ValidationError
@@ -276,13 +276,17 @@ def worker_digest() -> str:
     return hashlib.sha256(_WORKER.read_bytes()).hexdigest()[:16]
 
 
-def _to_wsl_path(path: Path) -> str:
-    """C:\\Users\\me\\x  ->  /mnt/c/Users/me/x"""
-    path = path.resolve()
+def _wsl_path(path: PureWindowsPath) -> str:
+    """C:\\Users\\me\\x  ->  /mnt/c/Users/me/x. Pure string work, so it behaves the same on every platform."""
     drive, rest = path.drive, path.as_posix()[len(path.drive):]
     if len(drive) != 2 or drive[1] != ":":
         raise QCError(f"cannot map {path} into WSL (only drive-letter paths are supported)")
     return f"/mnt/{drive[0].lower()}{rest}"
+
+
+def _to_wsl_path(path: Path) -> str:
+    """The same for a real path on this machine (which is only meaningful on Windows, where WSL is reached)."""
+    return _wsl_path(PureWindowsPath(path.resolve()))
 
 
 class PySCFProgram(QCProgram):

@@ -7,8 +7,9 @@ PySCF is not installed.
 """
 import json
 import math
+import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import numpy as np
 import pytest
@@ -20,7 +21,7 @@ from substrate.engines.electronic import EVBFlexibleProtonTransferEngine
 from substrate.engines.qc_scan import QCScanEngine, build_geometry, validate_molecule
 from substrate.molecules import zundel_cation
 from substrate.qc import (
-    PySCFProgram, QCCache, QCJob, QCProgram, QCResult, _to_wsl_path, compute_cached, get_program, register_program,
+    PySCFProgram, QCCache, QCJob, QCProgram, QCResult, _to_wsl_path, _wsl_path, compute_cached, get_program, register_program,
 )
 from substrate.translators.electronic_to_quantum import ElectronicToQuantum
 
@@ -274,8 +275,23 @@ def test_a_machine_without_pyscf_or_wsl_is_reported_helpfully_and_the_real_tests
 def test_program_discovery_and_paths():
     with pytest.raises(QCError, match="unknown SUBSTRATE_QC_MODE"):
         PySCFProgram(mode="cloud").mode()
-    assert _to_wsl_path(Path("C:/Users/me/proj/file.py")) == "/mnt/c/Users/me/proj/file.py"
     assert get_program("pyscf").name == "pyscf"
+
+
+def test_a_windows_path_maps_into_wsl_the_same_way_on_every_platform():
+    """The mapping is string work on a Windows path, so it is tested everywhere; resolving a real path is only meaningful on Windows."""
+    assert _wsl_path(PureWindowsPath("C:/Users/me/proj/file.py")) == "/mnt/c/Users/me/proj/file.py"
+    assert _wsl_path(PureWindowsPath(r"D:\data\x.py")) == "/mnt/d/data/x.py"
+    for unmappable in ("//server/share/x.py", "/no/drive/x.py"):
+        with pytest.raises(QCError, match="only drive-letter paths"):
+            _wsl_path(PureWindowsPath(unmappable))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WSL is reached from Windows; elsewhere a path has no drive letter to map")
+def test_a_real_path_is_resolved_before_it_is_mapped():
+    relative = Path("some") / "x.py"                                                 # no drive letter until it is resolved
+    assert _to_wsl_path(relative) == _wsl_path(PureWindowsPath(Path.cwd() / relative))
+    assert _to_wsl_path(relative).startswith("/mnt/") and _to_wsl_path(relative).endswith("/some/x.py")
 
 
 # -- routing and the translators ----------------------------------------------------------------------------------------------

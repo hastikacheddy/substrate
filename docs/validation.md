@@ -2,7 +2,7 @@
 
 [← back to the README](../README.md)
 
-756 tests (73 need PySCF and skip without it). The 683 that do not take 1.5–5 min here depending on what else the machine is doing (90 s on a quiet one, 230–300 s on a busy one; the calibration fits, transfer fits and ensembles dominate), the whole suite 2–7 min with the real-chemistry energies cached (a cold WSL start adds a minute or two, and a first run computes a few hundred single points: ~8 more minutes unloaded, ~20 under load); they use closed-form results and independent calculations rather than the code agreeing with itself:
+758 tests (73 need PySCF and skip without it). The 685 that do not take 1.5–5 min here depending on what else the machine is doing (90 s on a quiet one, 230–300 s on a busy one; the calibration fits, transfer fits and ensembles dominate), the whole suite 2–7 min with the real-chemistry energies cached (a cold WSL start adds a minute or two, and a first run computes a few hundred single points: ~8 more minutes unloaded, ~20 under load); they use closed-form results and independent calculations rather than the code agreeing with itself:
 
 - **Calibration, against known truth.** On a synthetic reference built from known parameters: a noise-free surface is recovered exactly
   (every parameter to 0.2%, fit error 1e-5 eV); with 5 meV of noise, across independent noise realisations, the fitted values land within a few
