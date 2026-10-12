@@ -89,8 +89,8 @@ def test_a_query_is_checked_by_the_adapter_before_an_allowance_is_spent_or_anyth
 def test_the_default_client_may_reach_the_hosts_of_the_adapters_and_no_others(tmp_path):
     registry = Registry(f"sqlite:///{tmp_path / 'r.sqlite3'}")
     fabric = Fabric(registry, Artifacts(registry, LocalArtifactStore(tmp_path / "s")))
-    assert fabric.client.allowed_hosts == frozenset({"pubchem.ncbi.nlm.nih.gov", "data.rcsb.org"})
-    assert set(fabric.adapters) == {"nist.ion_energetics", "pubchem.compound", "rcsb.entry"}
+    assert fabric.client.allowed_hosts == frozenset({"pubchem.ncbi.nlm.nih.gov", "data.rcsb.org", "spec.jpl.nasa.gov"})
+    assert set(fabric.adapters) == {"nist.ion_energetics", "pubchem.compound", "rcsb.entry", "jpl.spectral_lines"}
     assert isinstance(fabric.client, SafeHTTPClient)
 
 

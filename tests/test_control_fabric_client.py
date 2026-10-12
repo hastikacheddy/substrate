@@ -265,3 +265,19 @@ def test_redaction_and_query_building():
     assert redact_url("https://user:pw@host.example:8443/a/b?k=v#f") == "https://host.example:8443/a/b"
     assert redact_url("not a url") == "<invalid url>" and redact_url("secret=abc") == "<invalid url>"
     assert with_query("https://host.example/p?a=1", key="x y", n=3) == "https://host.example/p?a=1&key=x+y&n=3"
+
+
+# -- a source that sends no Content-Type (JPL's catalog server) -------------------------------------------------------------------------------
+def test_a_response_with_no_content_type_is_refused_unless_the_caller_names_the_type_to_assume(client, server):
+    with pytest.raises(FetchError, match="content type"):
+        client.fetch(f"{server}/nocontent-type")
+    response = client.fetch(f"{server}/nocontent-type", assume_type="text/plain")
+    assert (response.content_type, response.body) == ("text/plain", b"{}")
+
+
+def test_assuming_a_type_never_overrides_one_the_server_sent_and_never_assumes_a_type_that_is_not_accepted(client, server):
+    with pytest.raises(FetchError, match="content type"):
+        client.fetch(f"{server}/html", assume_type="text/plain")                    # the server said text/html: refused whatever the caller assumes
+    assert client.fetch(f"{server}/csv", assume_type="text/plain").content_type == "text/csv"
+    with pytest.raises(FetchError, match="content type"):
+        client.fetch(f"{server}/nocontent-type", assume_type="text/html")           # not an accepted type, so not assumable
