@@ -139,7 +139,7 @@ def test_the_bundled_nist_set_is_an_adapter_with_no_network_and_valid_records():
 
 def test_the_adapters_describe_themselves_for_the_api():
     info = {d["id"]: d for d in (a.describe() for a in default_adapters().values())}
-    assert set(info) == {"nist.ion_energetics", "pubchem.compound", "rcsb.entry"} and info["nist.ion_energetics"]["network"] is False
+    assert set(info) == {"nist.ion_energetics", "pubchem.compound", "rcsb.entry", "jpl.spectral_lines"} and info["nist.ion_energetics"]["network"] is False
     assert info["pubchem.compound"]["hosts"] == ["pubchem.ncbi.nlm.nih.gov"] and info["rcsb.entry"]["license"].startswith("PDB archive data")
 
 

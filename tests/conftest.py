@@ -115,3 +115,41 @@ def zundel_system(program="pyscf", theory="hf", basis="6-31g*", scan_distance=2.
         structure={"molecule": zundel_cation(), "method": {"theory": theory, "basis": basis, "program": program},
                    "scan": {"mirror_symmetric": mirror}},
     )
+
+
+@pytest.fixture(autouse=True)
+def _registries_on_postgres(monkeypatch):
+    """Set SUBSTRATE_TEST_PG_URL to a PostgreSQL URL (a throwaway server, not one that matters) and every `sqlite:///...` registry a test builds is created in a private
+    schema of that server instead, so the control-plane tests run against the real database. The same SQLite URL gets the same schema within a test, which keeps the tests
+    that open one registry twice meaningful. Unset, this does nothing."""
+    import os
+    base = os.environ.get("SUBSTRATE_TEST_PG_URL")
+    if not base:
+        yield
+        return
+    import uuid
+
+    import sqlalchemy as sa
+    from substrate.control import db
+    real, schemas, engines = db.make_engine, {}, []
+    admin = sa.create_engine(base, future=True, isolation_level="AUTOCOMMIT")
+
+    def make_engine(url="sqlite:///substrate.sqlite3", **options):
+        if not url.startswith("sqlite"):
+            return real(url, **options)
+        if url not in schemas:
+            schemas[url] = "t_" + uuid.uuid4().hex[:16]
+            with admin.connect() as conn:
+                conn.execute(sa.text(f'CREATE SCHEMA "{schemas[url]}"'))
+        engine = real(base, connect_args={"options": f"-csearch_path={schemas[url]}"}, **options)
+        engines.append(engine)
+        return engine
+
+    monkeypatch.setattr(db, "make_engine", make_engine)
+    yield
+    for engine in engines:
+        engine.dispose()
+    with admin.connect() as conn:
+        for schema in schemas.values():
+            conn.execute(sa.text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+    admin.dispose()

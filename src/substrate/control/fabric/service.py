@@ -32,11 +32,12 @@ class Fabric:
         self.registry.consume(principal, "dataset_ingests_per_day", 1)
         if adapter.network:
             url = adapter.url(query)
-            response = self.client.fetch(url, headers=headers)
+            response = self.client.fetch(url, headers=headers, **({"assume_type": adapter.assume_type} if adapter.assume_type else {}))
             body, content_type, source_url, retrieved_at = response.body, response.content_type, response.url, response.retrieved_at
         else:
             body, content_type, source_url, retrieved_at = adapter.read(), "application/json", f"bundled:{adapter.id}", self.registry.clock()
         records = adapter.parse(body)
+        adapter.verify(records, query)                                          # what only the query can tell: that this is the thing that was asked for
         validate_records(records, adapter.fields, owner=dataset_id)             # nothing is kept of a response that does not check out
         media_type = content_type if content_type in ("application/json", "text/csv", "text/plain") else "text/plain"
         raw = self.artifacts.write(principal.tenant_id, body, name=f"{dataset_id}.raw", media_type=media_type)

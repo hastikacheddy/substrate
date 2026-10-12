@@ -276,6 +276,46 @@ def test_the_s3_store_detects_altered_objects_and_refuses_bad_addresses():
             store.get(tenant, address)
 
 
+class ClientError(Exception):
+    """Shaped like botocore's: the answer is in `.response`."""
+
+    def __init__(self, code, status):
+        super().__init__(f"{status} {code}")
+        self.response = {"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}}
+
+
+class BrokenS3(FakeS3):
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    def head_object(self, Bucket, Key):                                                       # noqa: N803
+        raise self.error
+
+    def get_object(self, Bucket, Key):                                                        # noqa: N803
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [ClientError("404", 404), ClientError("NoSuchKey", 404), ClientError("NotFound", 404)])
+def test_a_404_from_the_store_means_the_object_is_not_there(error):
+    store = S3ArtifactStore(BrokenS3(error), "bucket")
+    assert store.exists("T-0001", "a" * 64) is False
+    with pytest.raises(ArtifactError, match="no artifact"):
+        store.get("T-0001", "a" * 64)
+
+
+@pytest.mark.parametrize("error", [ClientError("403", 403), ClientError("SignatureDoesNotMatch", 403), ClientError("AccessDenied", 403), ClientError("InternalError", 500),
+                                   ClientError("SlowDown", 503), ClientError("NoSuchBucket", 404), ConnectionError("refused")])
+def test_any_other_failure_of_the_store_is_raised_and_is_not_mistaken_for_a_missing_object(error):
+    store = S3ArtifactStore(BrokenS3(error), "bucket")
+    with pytest.raises(type(error)):
+        store.exists("T-0001", "a" * 64)
+    with pytest.raises(type(error)):
+        store.get("T-0001", "a" * 64)
+    with pytest.raises(type(error)):
+        store.put("T-0001", b"data")                                                          # it must not go on to write because the HEAD "found nothing"
+
+
 def test_the_service_works_the_same_over_the_s3_store(world):
     artifacts = Artifacts(world["registry"], S3ArtifactStore(FakeS3(), "bucket"))
     ref = artifacts.write_json(world["tenant"], {"k": [1, 2]}, name="x.json")
