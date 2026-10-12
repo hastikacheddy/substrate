@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: substrate
+  labels:
+    # The "restricted" Pod Security Standard: non-root, no privilege escalation, all capabilities dropped, a seccomp profile. Every pod here meets it.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: substrate
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - storage.yaml
+  - postgres.yaml
+  - api.yaml
+  - worker.yaml
+  - networkpolicy.yaml
+# Point this at the image you built and pushed (deploy/Dockerfile). Prefer a digest in production: `digest: sha256:...` instead of newTag.
+images:
+  - name: substrate
+    newName: substrate
+    newTag: dev

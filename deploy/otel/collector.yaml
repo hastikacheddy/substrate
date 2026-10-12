@@ -1,0 +1,41 @@
+# OpenTelemetry Collector: receives the workers' spans over OTLP/HTTP, batches them and hands them to Tempo.
+# Only the workers send here, over a network that holds nothing else of theirs; the collector is the one place the trace pipeline can be changed (sampling,
+# attribute removal, a different backend) without touching the application.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        max_request_body_size: 4194304
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  # Span attributes carry run, task, tenant and queue identifiers and nothing from a request body or a result. If a deployment adds attributes that could carry
+  # secrets, add an `attributes` processor here that deletes them.
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+    tls:
+      insecure: true            # the monitoring network is internal to the host; put mTLS here if the backend is elsewhere
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+
+service:
+  extensions: [health_check]
+  telemetry:
+    metrics:
+      level: none
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/tempo]

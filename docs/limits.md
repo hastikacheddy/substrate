@@ -92,3 +92,13 @@ the background), edits only scalar inputs, and ensembles of a slow experiment re
 after a run that took over six seconds). A job the server loses on restart is lost, though a finished transfer study is saved and reloaded. The
 quantum-chemistry experiments need PySCF; without it the GUI says so and reads only energies that are already cached. Concurrent runs are safe but
 queue at the ODE solver, which can integrate one problem at a time per process.
+
+## The control plane
+
+It adds the limits of any service on top of everything above, and it has not all been run against the real thing; [platform.md](platform.md) lists exactly what has and has not. In short: the
+containers and manifests were checked, not run; PostgreSQL, the S3 store, the PubChem and RCSB adapters and the Linux-only resource limits were never exercised against a real server or
+a real kernel here; the quantum solver is a one-qubit simulator on a 2×2 problem; the queue is the database and will not serve thousands of tasks a second; the API speaks plain HTTP behind
+a proxy you supply; and a worker holds the database credential, so it is as trusted as the database ([SECURITY.md](../SECURITY.md)).
+
+A reproduction is judged to a relative tolerance of 10⁻⁶ because the solver stack is not repeatable below about 10⁻⁹ even on one machine (the measurement is in [findings.md](findings.md)). A real
+difference smaller than 10⁻⁶ in an observable would be called a match.

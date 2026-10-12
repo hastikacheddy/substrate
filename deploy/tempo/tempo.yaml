@@ -1,0 +1,27 @@
+# Grafana Tempo, single binary, local disk: the trace store behind the collector. Grafana reads it at http://tempo:3200.
+# Traces are kept for 7 days. For anything but a single host, use an object store here.
+server:
+  http_listen_port: 3200
+  http_listen_address: 0.0.0.0
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+
+compactor:
+  compaction:
+    block_retention: 168h
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+usage_report:
+  reporting_enabled: false

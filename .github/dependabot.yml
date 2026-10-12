@@ -10,3 +10,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+  - package-ecosystem: docker                # the base image in deploy/Dockerfile (pin it by digest and this keeps the digest current)
+    directory: "/deploy"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker-compose        # the PostgreSQL, Prometheus, Grafana, Tempo and collector images in deploy/docker-compose.yml
+    directory: "/deploy"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -1,0 +1,85 @@
+# A single PostgreSQL instance for small installs and trials. For anything that matters use a managed PostgreSQL and delete this file: a single replica with one
+# volume has no failover and no backups. If you do, point `db_url` in the substrate-secrets Secret at it and change the postgres NetworkPolicy rules in
+# networkpolicy.yaml to its address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: substrate
+  labels: {app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: substrate}
+spec:
+  clusterIP: None
+  selector: {app.kubernetes.io/name: postgres}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: substrate
+  labels: {app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: substrate}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: postgres}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: substrate}
+    spec:
+      serviceAccountName: substrate
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: postgres, containerPort: 5432}
+          env:
+            - {name: POSTGRES_DB, value: substrate}
+            - {name: POSTGRES_USER, value: substrate}
+            - {name: POSTGRES_PASSWORD_FILE, value: /run/secrets/db_password}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            exec: {command: [pg_isready, -U, substrate, -d, substrate]}
+            periodSeconds: 10
+          livenessProbe:
+            exec: {command: [pg_isready, -U, substrate, -d, substrate]}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+        - {name: run, emptyDir: {sizeLimit: 8Mi}}
+        - name: secrets
+          secret:
+            secretName: substrate-secrets
+            defaultMode: 0440
+            items:
+              - {key: db_password, path: db_password}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 20Gi

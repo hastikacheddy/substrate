@@ -1,0 +1,171 @@
+# A single-host deployment: PostgreSQL, the API, two workers, and the monitoring stack (Prometheus, Grafana, an OpenTelemetry collector, Tempo).
+#
+#   see deploy/secrets/README.md for the four secret files this needs
+#   docker compose -f deploy/docker-compose.yml up --build
+#   docker compose -f deploy/docker-compose.yml run --rm api platform init --tenant lab     # prints the first administrator's key, once
+#
+# What it does for safety: nothing publishes a port except on 127.0.0.1; the database and the workers are on networks with no route out; the workers can reach
+# the database and the collector and nothing else; containers run as unprivileged users with a read-only root filesystem, no Linux capabilities and no privilege
+# escalation; every secret is a file mounted under /run/secrets, never an environment value.
+# Not included: a Redis broker (the task queue lives in the database), an S3 artifact store (artifacts share a volume; the S3 store is in the code but boto3 is
+# not in the image), TLS (put a proxy in front of 127.0.0.1:8080 before exposing the API), alert delivery (Prometheus evaluates deploy/prometheus/alerts.yml; sending
+# the alerts somewhere is yours to add).
+# Not tested: tests/test_deploy.py checks this file's structure and the properties above, but it has not been run against a Docker daemon.
+
+name: substrate
+
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:size=64m"]
+  restart: unless-stopped
+  pids_limit: 512
+
+x-environment: &environment
+  SUBSTRATE_DB_FILE: /run/secrets/db_url
+  SUBSTRATE_STORE: /data/artifacts
+  SUBSTRATE_IMAGE_DIGEST: ${SUBSTRATE_IMAGE_DIGEST:-}
+
+x-substrate: &substrate
+  image: substrate:${SUBSTRATE_TAG:-dev}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  user: "10001:10001"
+  environment: *environment
+  secrets: [db_url]
+  volumes:
+    - artifacts:/data/artifacts
+  <<: *hardened
+
+services:
+  db:
+    image: postgres:16-alpine
+    <<: *hardened
+    user: "70:70"
+    environment:
+      POSTGRES_DB: substrate
+      POSTGRES_USER: substrate
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    tmpfs: ["/tmp:size=64m", "/run/postgresql:size=8m"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U substrate -d substrate"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    <<: *substrate
+    command: ["platform", "serve", "--host", "0.0.0.0", "--allow-external"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [frontend, backend, monitoring]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *substrate
+    command: ["platform", "worker", "--queues", "cpu,quantum", "--isolation", "process"]     # no "chemistry": the image has no PySCF, so those tasks wait for a worker that does
+    environment:
+      <<: *environment
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: substrate-worker
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [backend, telemetry]
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4g
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    <<: *hardened
+    user: "10001:10001"
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol/collector.yaml:ro
+    networks: [telemetry, monitoring]
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    <<: *hardened
+    user: "10001:10001"
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
+    networks: [monitoring]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    <<: *hardened
+    user: "65534:65534"
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=30d"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    secrets: [prometheus_token]
+    networks: [monitoring]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    <<: *hardened
+    user: "472:472"
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_COOKIE_SECURE: "false"       # plain HTTP on loopback; set true behind a TLS proxy
+    secrets: [grafana_admin_password]
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on: [prometheus, tempo]
+    networks: [monitoring, frontend]
+
+networks:
+  frontend: {}                       # the only network with a route out; the API needs it to fetch datasets, Grafana to publish its port
+  backend:
+    internal: true                   # the database, the API and the workers: no route to the internet
+  telemetry:
+    internal: true                   # the workers and the collector, nothing else
+  monitoring:
+    internal: true                   # the collector, Tempo, Prometheus, Grafana, and the API (for its /metrics)
+
+volumes:
+  dbdata: {}
+  artifacts: {}
+  promdata: {}
+  grafanadata: {}
+  tempodata: {}
+
+secrets:
+  db_url:
+    file: ./secrets/db_url                       # postgresql+psycopg2://substrate:<password>@db:5432/substrate
+  db_password:
+    file: ./secrets/db_password
+  prometheus_token:
+    file: ./secrets/prometheus_token             # an API key of an OPERATOR (`platform apikey create prometheus --role OPERATOR`)
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password

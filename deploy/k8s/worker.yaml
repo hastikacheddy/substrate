@@ -1,0 +1,59 @@
+# Workers run the steps. Each step runs in its own process with a deadline, a scrubbed environment and (on Linux) address-space and CPU limits; the pod is the
+# outer boundary: no token, no capabilities, a read-only root, and a network policy that lets it reach the database and nothing else.
+# To send traces to a collector, add OTEL_EXPORTER_OTLP_ENDPOINT to the environment below and allow the egress in networkpolicy.yaml.
+# Scale with `kubectl -n substrate scale deployment/substrate-worker --replicas=N`; add a Deployment per queue for dedicated workers (a `chemistry` worker needs an image with PySCF).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: substrate-worker
+  namespace: substrate
+  labels: {app.kubernetes.io/name: substrate-worker, app.kubernetes.io/part-of: substrate}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: substrate-worker}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: substrate-worker, app.kubernetes.io/part-of: substrate}
+    spec:
+      serviceAccountName: substrate
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: substrate:dev
+          imagePullPolicy: IfNotPresent
+          args: ["platform", "worker", "--queues", "cpu,quantum", "--isolation", "process"]        # no "chemistry": the image has no PySCF, so those tasks wait for a worker that does
+          env:
+            - {name: SUBSTRATE_DB_FILE, value: /run/secrets/db_url}
+            - {name: SUBSTRATE_STORE, value: /data/artifacts}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "2", memory: 4Gi}
+          volumeMounts:
+            - {name: artifacts, mountPath: /data/artifacts}
+            - {name: tmp, mountPath: /tmp}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim: {claimName: substrate-artifacts}
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - name: secrets
+          secret:
+            secretName: substrate-secrets
+            defaultMode: 0440
+            items:
+              - {key: db_url, path: db_url}

@@ -81,3 +81,12 @@ and makes you name the route.
   every derived parameter and observable. Scalars also get a 68% percentile `band`, and the report prints it instead of `±`
   when the spread rivals the value: for exponentially sensitive quantities like rate constants a standard deviation
   can exceed the mean (a `±` larger than a positive rate is meaningless). Draws that fail validation are counted and dropped.
+- **`translators/*.py`: what each hop discards.** Each translator declares `discarded`, the information that does not survive the hop (the excited-state surface, the
+  donor–acceptor distance as a variable, coherent dynamics, the individual rate constants of an enzyme cycle), and the pipeline copies it into the product's `ProvenanceRecord` and into
+  the run report. It is documentation that travels with the data, not a measure of the loss.
+- **`qpu.py`: a quantum solver seam.** `QuantumSolverBackend` implements `symmetric_eigh` by a variational calculation on one simulated qubit and matches the classical backend to
+  about 1e-15 on the 2×2 problems the electronic engines produce; it refuses anything else rather than quietly falling back. `QuantumPolicy` bounds what a quantum job may ask for.
+  An experiment selects it with `backend: {type: quantum, provider: simulator}`. It shows the seam and the policy; it is not a quantum advantage, and no hardware provider is included.
+- **`control/`: the control plane.** The scientific core running as a service for several people: an API, a tenant-scoped registry, a task queue, workers, content-addressed artifacts,
+  a six-axis run status, reproduction, an allow-listed data fabric, metrics and traces. It adds nothing to the core and is optional (`pip install -e ".[platform]"`).
+  See [platform.md](platform.md).

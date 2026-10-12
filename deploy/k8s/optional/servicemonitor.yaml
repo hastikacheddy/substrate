@@ -1,0 +1,19 @@
+# For clusters running the Prometheus Operator (not part of the kustomization: the CRD may not exist). Prometheus scrapes the API's /metrics with the key of an
+# OPERATOR principal, which you put in a Secret in this namespace first:
+#   kubectl -n substrate create secret generic prometheus-token --from-file=token=<file holding the key>
+# and the monitoring namespace must be allowed by the api-ingress NetworkPolicy.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: substrate-api
+  namespace: substrate
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: substrate-api}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      authorization:
+        type: Bearer
+        credentials: {name: prometheus-token, key: token}

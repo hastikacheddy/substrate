@@ -2,7 +2,7 @@
 
 [← back to the README](../README.md)
 
-758 tests (73 need PySCF and skip without it). The 685 that do not take 1.5–5 min here depending on what else the machine is doing (90 s on a quiet one, 230–300 s on a busy one; the calibration fits, transfer fits and ensembles dominate), the whole suite 2–7 min with the real-chemistry energies cached (a cold WSL start adds a minute or two, and a first run computes a few hundred single points: ~8 more minutes unloaded, ~20 under load); they use closed-form results and independent calculations rather than the code agreeing with itself:
+1,764 tests (73 need PySCF and skip without it). The 1,691 that do not take 10 to 20 minutes here depending on what else the machine is doing (the calibration fits, transfer fits, ensembles and the control plane's process-per-step and multi-worker tests dominate); without the platform extras 1,252 of them run (30 skip) in about six minutes. The whole suite took 20 minutes on an idle machine at the last run, with the real-chemistry energies cached (a cold WSL start adds a minute or two, and a first run computes a few hundred single points: ~8 more minutes unloaded, ~20 under load). They use closed-form results and independent calculations rather than the code agreeing with itself:
 
 - **Calibration, against known truth.** On a synthetic reference built from known parameters: a noise-free surface is recovered exactly
   (every parameter to 0.2%, fit error 1e-5 eV); with 5 meV of noise, across independent noise realisations, the fitted values land within a few
@@ -115,6 +115,48 @@
   network (it was shown to fail on a planted module that did all four). Mutation testing: 28 mutants of the places the limits are applied, 26 of the cache and name checks, 9 of the loader,
   18 of `limits.py` and 6 of the cache command, all caught. Two things this found: the mutation runner had been running tests from the wrong directory for some files (it now checks its own
   baseline), and the one surviving mutant of the cache (strict mode also testing the state, not just the worker) is equivalent, since a legacy entry has no worker.
+- **The control plane** (`tests/test_control_*.py`, `tests/test_qpu.py`, `tests/test_discarded.py`, `tests/test_deploy.py`; [platform.md](platform.md) describes what it is). *Keys and tenants:* only the SHA-256 of a key's
+  secret is stored, and no table holds the token; a wrong, unknown, malformed, revoked or disabled key authenticates nobody and the refusal is the same whichever it was; the whole role table is written out
+  and compared entry by entry (each role's set of actions, and which roles may read metrics, the audit trail, artifacts or use quantum compute); an experiment, run, task, artifact, event or principal of
+  another tenant answers "not found" from every lookup, listing, count, cancel and close, and the registry itself, not only the API in front of it, refuses a role that may not read. *Allowances:* a daily allowance
+  is used up exactly, a refused request is not charged, usage is per person and per day, an override belongs to the tenant that set it, and a block is an audit event with the figures. *The hash chain:*
+  an edit, a deletion and a reordering are each detected, a forged event is refused by the unique index, and a writer that loses the race for the link (or, on SQLite, for the write lock) retries and
+  gives up after a fixed number of tries. *The queue:* a task is taken once by many racing workers (repeated runs), oldest first, only from the queues the worker serves; a dead worker's task goes to
+  another and its late result is refused; the backoff doubles and is capped; a task that fails for good skips everything after it in the same transaction; the invariants that make some of the conditions redundant
+  (a lease owner exists exactly while a task runs) are tested themselves. *Status:* every kind of failure lands on the axis where it happened, a failure with no recorded axis is an execution failure, and
+  each axis is tested for each outcome it can have, for experiments and for transfer studies. *Reproduction:* a 10⁻³ change in one input is detected and a 10⁻⁹ one tolerated; the environment hash follows the
+  software and ignores the host; the comparison is relative, finds one wrong element, and keeps NaNs in their places. *Artifacts:* bytes come out as they went in, a changed file is detected on read and on
+  rewrite, an address that could leave the store is refused, pickled arrays and JSON with `NaN` are refused at the boundary. *Steps in their own process:* the same answers as in-process, a deadline that
+  kills, a scrubbed environment, a crash that is not a hang, and a pickle sent by the child that is never loaded. *The fetch client:* every internal, loopback, link-local, multicast and shared address is refused,
+  including one written as IPv4-in-IPv6; the connection goes to the address that was checked (a name that answers differently the second time is not followed); redirects are followed up to three and
+  checked at each hop; a body one byte over the limit is refused, not truncated; the certificate is verified for the host name. *The quantum solver:* every gate is unitary and the circuits give the
+  known states; the solver matches `eigh` to about 10⁻¹⁵, takes its energies only from expectation values and refuses anything but a real symmetric 2×2; each limit of the policy holds at exactly its value.
+  *Metrics and dashboards:* a test runs a successful run, a refused run, a waiting run, a refusal and a failed login, collects every series with its labels, and checks that every metric, label and label
+  value that the dashboard and the alerts name is one the code emits (and that the checker itself rejects a wrong name, label, value and an unbalanced bracket). *Deployment:* the Compose file and the
+  Kubernetes manifests are checked for each security property they claim (read-only roots, no capabilities, loopback-only ports, internal networks, secrets as files, default-deny network policies, the metadata
+  address excluded) and for every cross-reference (commands the CLI accepts, mounted files that exist, ports and hosts that agree), and are passed to the real `docker compose config` and `kubectl kustomize`.
+  *Mutation testing:* a first pass of 564 one-line mutants of the control plane's sixteen modules (a comparison reversed, a check dropped, a role widened, a tenant filter removed, a limit raised, an
+  error caught too narrowly) caught 411 (73%). The survivors were real gaps, and a test was written for each: the whole role table (a spot check had let two entries drift unnoticed), the exact byte at which an
+  allowance or a tenant's storage runs out, the boundaries of the request-size guard (driven as a bare ASGI application, where a request can declare a size it never sends), how many redirects the fetch client
+  follows and that a body one byte over is refused, that the child process really ends up with the scrubbed environment and nothing else, what the audit trail and the metrics show for a tenant that is not the first,
+  and the permission checks that only the API layer enforced. Two more passes over the survivors and a full pass over the worker and orchestrator brought the total to **586 of 612 mutants caught**
+  (mutants were added and a few mis-written patterns corrected along the way). The mutation lists are working files and are not shipped. The **26 that remain** are not gaps in the tests: 2 are timing properties no
+  output shows (a constant-time comparison of a key's hash; the cost of rejecting an unknown key id as against a wrong secret); 2 can be seen only on Linux (the file-size limit, and a limit that would exceed the hard limit
+  the process already has), where the tests for them run in CI, and where I checked the same code by hand under WSL (an 11 MiB write is refused with `EFBIG`, a requested limit is clamped to the existing hard limit); and 22
+  change code that another check makes redundant, for example five API routes that check a permission the orchestrator checks again, `np.load(..., allow_pickle=False)` already refusing an object array, a credential
+  keep-list entry that no real variable name needs, `is_link_local` and `is_unspecified` in a list whose `is_private` already covers them, and redacting a token glued to a word, which errs on the safe side.
+  Reading the registry for the mutation tests also showed several read methods that relied on the API to check the caller's role; they check it themselves now (the only change to the code that mutation testing led to,
+  apart from naming the environment scrub so that it can be tested).
+  Bugs found in the platform code while building and testing it: a reproduction tolerance of 10⁻¹² absolute that let a real 10⁻³ difference through (now relative, 10⁻⁶, measured: see
+  [findings.md](findings.md)); two tests that compared result digests across runs and failed about one run in thirty because the solver stack is not bitwise repeatable (the comparison is now the assertion);
+  an audit call that passed a keyword argument colliding with a positional one and left tasks stuck in `running` (the outcome is now recorded before anything else can fail); a missing dataset that was retried
+  as if it might appear; an artifact named `report.json` by a task output clashing with the report; a race recording the same artifact from many workers, and run-specific names for shared bytes; Windows
+  sharing violations when one writer renames over a file another is reading; a worker credential that could read artifacts and datasets over the API; a request body over the limit answered with 400 instead of
+  413 because the framework swallowed the exception; a redaction that leaked `Authorization: Bearer` with a short value; a quantum job's circuit count that was 48 where 57 would run, so the policy was asked
+  about fewer circuits than were executed; errors that lost their class across the process boundary, so a quantum-policy refusal looked like a crash; guard tests that asked for a billion points and, with the
+  guard removed, ran until their timeout; task and run counters that live in the worker processes and so never reached the API's `/metrics` (found while writing the dashboard; the `*_recent` gauges now read them from
+  the database); and a schema creation that would race when several pods start together on PostgreSQL. Reading the registry again for the mutation tests showed that several of its read methods relied on the API
+  to check the caller's role; they check it themselves now.
 - **The tests can fail.** Deliberately injected bugs (a 1% coupling error, a 1 meV surface shift, no mass weighting, no zero-point term,
   a wrong coordinate-transform row, an inverted K_d, the wrong state's population, a broken stationary-distribution step, swapped
   chemical rates, context parameters not carried, a wrong Haldane factor, a flipped exchange-law sign, a dropped reverse-rate sign, a

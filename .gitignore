@@ -22,3 +22,11 @@ runs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# deployment secrets (the README beside them is kept) and local environment files
+deploy/secrets/*
+!deploy/secrets/README.md
+.env
+.env.*
+substrate-artifacts/
+*.sqlite3

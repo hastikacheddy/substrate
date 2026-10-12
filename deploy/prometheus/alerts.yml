@@ -1,0 +1,50 @@
+# Alerts on the signals the platform exposes. Prometheus evaluates them and shows them at /alerts; delivering them (to Alertmanager, a pager, a chat) is a deployment
+# choice this file does not make. Every metric named here is checked against the metrics the code exposes by tests/test_deploy.py.
+groups:
+  - name: substrate
+    rules:
+      - alert: SubstrateApiDown
+        expr: up{job="substrate-api"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: The API's /metrics cannot be scraped.
+          description: The API is down, unreachable, or rejecting the Prometheus key (check that the key still belongs to an active OPERATOR).
+
+      - alert: SubstrateQueueBacklog
+        expr: sum(substrate_queue_depth) > 100
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: More than 100 tasks have been waiting for 15 minutes.
+          description: Workers are missing, stuck, or too few for the load. Compare with substrate_tasks_recent{state="running"}.
+
+      - alert: SubstrateRunsFailing
+        expr: sum(substrate_runs_recent{state="failed"}) / clamp_min(sum(substrate_runs_recent), 1) > 0.25 and sum(substrate_runs_recent) >= 8
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: More than a quarter of the last day's runs failed.
+
+      - alert: SubstrateSecurityAxisFailing
+        expr: sum(substrate_run_axis_recent{axis="security", state="FAIL"}) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: A run was stopped by a limit, quota, policy or authorisation check in the last day.
+          description: Look at /audit for the events; one refusal is normal, a burst is a probe or a misconfigured client.
+
+      - alert: SubstrateAuthFailureBurst
+        expr: sum(rate(substrate_auth_failures_total[5m])) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: More than one failed authentication per second for ten minutes.
+          description: A misconfigured client or someone guessing keys. Keys are 256-bit random, so guessing cannot succeed, but it costs database lookups.
+
+      - alert: SubstrateReproducibilityFailing
+        expr: sum(substrate_run_axis_recent{axis="reproducibility", state="FAIL"}) > 0
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: A reproduction did not match the run it re-executed, or a pinned dataset is gone.

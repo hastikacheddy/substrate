@@ -33,3 +33,23 @@ effect being tested (0.18 eV for one ion here). Candidates, in the order of how 
 energies, electron affinities, heats of formation) for the same fragments; the GMTKN55 reaction-energy benchmark subsets for hydrogen bonds and proton
 transfer, which would put a number on each level of theory and basis used here; JPL, KIDA or UMIST rate tables for the reaction scale; and BRENDA or SBML models
 for the metabolic scale. None of these is built.
+
+## Adding to the control plane
+
+**A data source for the data fabric** is an `Adapter` subclass in `control/fabric/adapters.py`: an `id`, a `source` and `license` (both shown to users and stored with every dataset
+version), a `hosts` property naming the only hosts it may contact (empty for local data), `check_query` (refuse anything that is not a short, plain value; the query goes into a URL),
+`dataset_id` (the stable name a query maps to, so a repeated fetch becomes the next version of the same dataset), `url`, `parse` (bytes in, a list of records out) and `fields`, a tuple of `Field(name, type, ...)` that every record must satisfy (type, range, pattern, length) before anything is stored.
+Register it in `default_adapters()`. The client enforces the allowlist, HTTPS, the size cap and the address checks; an adapter does not, and cannot, switch any of that off. Test it against a
+local server that returns what the source's documentation says (see `tests/test_control_fabric.py`), and run it once against the real service before trusting it: a documented shape and a real one
+differ more often than you would like.
+
+**A new kind of task** is a handler in `control/tasks.py` (`handler(context) -> (output, lineage)`, the output being JSON-able and stored as an artifact), a `TaskSpec` where the workflow is
+planned, and a rule in `control/status.py` for which status axis a failure of that kind belongs to. Decide whether its refusals are deterministic (never retried) in
+`status.is_deterministic_refusal`. If it needs a different kind of worker, give it a queue name and start workers with `--queues`.
+
+**A quantum provider** is a backend class with the `SolverBackend` interface, added to `qpu.backend_from_config`, and its name in `QuantumPolicy.providers` and `hardware_providers`. The gateway then
+checks the policy and spends the submitter's `qpu_jobs_per_day` allowance for each task, and writes an audit event either way. The credentials belong to the gateway's process and must be read
+from the environment or a secrets file there; never from an experiment, and never in the worker's scrubbed environment (the sandbox removes `IBM_`, `QISKIT_`, `AWS_` and similar names).
+
+**A new role or permission** is an `Action` in `control/security.py`, an entry in `PERMISSIONS`, and `Depends(allowed(Action.X))` on the endpoint. `tests/test_control_registry.py` pins the table, so a change
+to who may do what is a decision that has to be made twice.

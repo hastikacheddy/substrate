@@ -1,0 +1,112 @@
+# Default deny, then exactly what is needed. A NetworkPolicy only works if the cluster's network plugin enforces it (Calico, Cilium, ...); on one that does not,
+# these objects are accepted and do nothing.
+#
+#   API      <- the ingress controller and the monitoring namespace (edit the namespace names below)
+#   API      -> PostgreSQL, DNS, and the public internet on 443 minus every private, link-local and cloud-metadata address (to fetch datasets)
+#   workers  -> PostgreSQL and DNS only
+#   PostgreSQL <- the API and the workers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: substrate
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: substrate
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-ingress
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: substrate-api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [ingress-nginx, monitoring]
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-egress
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: substrate-api}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
+      ports:
+        - {protocol: TCP, port: 5432}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16          # link-local, including the cloud metadata service at 169.254.169.254
+              - 100.64.0.0/10           # carrier-grade NAT, used for node addresses on some clouds
+              - 127.0.0.0/8
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-egress
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: substrate-worker}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
+      ports:
+        - {protocol: TCP, port: 5432}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: substrate
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: postgres}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: substrate-api}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: substrate-worker}
+      ports:
+        - {protocol: TCP, port: 5432}

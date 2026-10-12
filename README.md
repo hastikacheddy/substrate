@@ -5,7 +5,7 @@
 **Propagate scientific models across scales, through one representation, with every hop documented and validated.**
 
 ![python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-758-brightgreen)
+![tests](https://img.shields.io/badge/tests-1764-brightgreen)
 ![status](https://img.shields.io/badge/status-research%20prototype-orange)
 ![quantum chemistry](https://img.shields.io/badge/quantum%20chemistry-PySCF-6f42c1)
 
@@ -45,7 +45,10 @@ valence-bond model, fitted to one molecule at one level of theory, say anything 
   the environment, not by the file, and is checked before anything is allocated; the cache is sealed; CI audits the pinned dependencies and publishes an SBOM. The threat model, and
   what is *not* defended, is in [SECURITY.md](SECURITY.md).
 - **Mission control.** A local web GUI over the same engines: edit any input and the whole chain re-runs, or explore the transfer study as a clickable matrix.
-- **Tested hard.** 758 tests, closed-form and independent checks, and mutation testing of the numerical code. Bugs found in my own work are listed, not hidden.
+- **A control plane for more than one person.** An API, a tenant-scoped registry with roles and quotas, a task queue and workers (each step in its own process), content-addressed artifacts,
+  a six-axis run status instead of "failed", `reproduce` that re-runs and compares, an allow-listed data fabric (PubChem, RCSB, the bundled NIST set), a quantum-solver seam with a policy gateway,
+  metrics, traces and a Grafana dashboard, and Docker Compose and Kubernetes files. What was run and what was only checked structurally is stated in [docs/platform.md](docs/platform.md).
+- **Tested hard.** 1,764 tests, closed-form and independent checks, and mutation testing of the numerical code and of the control plane (586 of 612 mutants caught; the other 26 are accounted for). Bugs found in my own work are listed, not hidden.
 
 ## Screenshots
 
@@ -89,11 +92,11 @@ prediction (blue) and the ion's own fit (dashed), the barrier at every distance,
 ```bash
 git clone https://github.com/hastikacheddy/substrate.git
 cd substrate
-pip install -e ".[dev]"
+pip install -e ".[dev,platform]"                                     # the platform extra is for the control plane; the scientific core needs only ".[dev]"
 
 python -m substrate run experiments/proton_transfer_pathway.yaml     # five scales, nine stages
 python -m substrate gui                                              # mission control, http://127.0.0.1:8765/
-pytest -m "not qc"                                                   # 685 tests, no PySCF needed (1.5–5 min)
+pytest -m "not qc"                                                   # 1,691 tests, no PySCF needed (10 to 20 min)
 ```
 
 An experiment is a YAML file. Naming only the destination scale is enough when the route is unambiguous, and a `sigma` turns an input into a Monte-Carlo draw through the whole chain:
@@ -578,7 +581,7 @@ Read [docs/limits.md](docs/limits.md); in brief:
 
 ## Validation
 
-758 tests: 685 run without PySCF (1.5–5 minutes), and 73 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
+1,764 tests: 1,691 run without PySCF (10 to 20 minutes with the platform extras installed; without them 1,252 run and 30 skip, in about 6 minutes), and 73 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
 
 - The two-state model equals the engine's diagonalisation to 1e-10; the closed-form calibration recovers a noise-free surface exactly and reports honest uncertainty on a noisy one.
 - The PySCF bridge is checked against physics: the variational principle and the Hartree–Fock limit, invariance under rigid motion, CCSD being exact for two electrons (so the triples correction vanishes),
@@ -598,13 +601,16 @@ src/substrate/
   calibration.py  transfer.py  diatomics.py     fit the model to a surface; cross-prediction and learning curves; free X–H Morse curves
   datasets.py  data/  fragments.py              measured reference values (NIST proton affinities and acidities) with their provenance; a complex taken apart into its four fragments
   limits.py  safeload.py                        resource limits (from the environment) and the loader that does not trust an experiment file
+  qpu.py                                        a small statevector simulator, the quantum solver backend, and the policy that bounds a quantum job
+  control/                                      the control plane: API, registry, roles and quotas, queue, workers, sandbox, artifacts, data fabric, metrics (the `platform` extra)
   molecules.py                                  templates: Zundel, ammonium dimer, bifluoride, water–ammonia, methanol–water, ...
   gui/                                          the local web GUI: standard-library server, plain HTML/JS, no build step, no external requests
+deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, Prometheus, Grafana and OpenTelemetry configuration
 experiments/                                    runnable experiment files; references/ (24 real surfaces) and benchmarks/ (8 bifluoride surfaces)
 examples/                                       the scripts in the table above
-tests/                                          758 tests
+tests/                                          1,764 tests
 docs/                                           architecture, science, findings, validation, limits, extending, images
-.github/                                        CI (tests, dependency audit, SBOM), CodeQL, Dependabot; requirements-lock.txt pins the runtime versions
+.github/                                        CI (tests, dependency audit, SBOM, container build), CodeQL, Dependabot; the requirements-*lock.txt files pin the versions
 SECURITY.md                                     the threat model, what is defended, what is not, how to report a vulnerability
 ```
 
@@ -616,15 +622,16 @@ SECURITY.md                                     the threat model, what is defend
 | [docs/limits.md](docs/limits.md) | What the numbers can and cannot support |
 | [docs/science.md](docs/science.md) | The implemented science, scale by scale |
 | [docs/architecture.md](docs/architecture.md) | The IR, routing, backends, the QC bridge, the GUI |
+| [docs/platform.md](docs/platform.md) | The control plane: runs, status axes, reproduction, data fabric, deployment, and what has not been verified |
 | [docs/validation.md](docs/validation.md) | How each part is tested, and the bugs the tests found |
 | [docs/extending.md](docs/extending.md) | Adding the next scale or model |
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"            # add ".[plots]" for the benchmark figure
+pip install -e ".[dev,platform]"   # add ".[plots]" for the benchmark figure; ".[postgres,otlp]" for those deployment options
 pytest                             # everything; tests marked `qc` need PySCF and skip without it
-pytest -m "not qc"                 # the 685 that do not
+pytest -m "not qc"                 # the 1,691 that do not
 ```
 
 ## Credits and license

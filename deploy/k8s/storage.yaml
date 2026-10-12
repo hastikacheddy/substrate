@@ -1,0 +1,14 @@
+# The artifact store. The API and every worker read and write it, so it must be shared storage: ReadWriteMany.
+# If the cluster has no ReadWriteMany class, use an S3-compatible store instead (`SUBSTRATE_STORE=s3://bucket/prefix`, with AWS_* credentials and
+# SUBSTRATE_S3_ENDPOINT in the environment); that needs boto3, which the shipped image does not include.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: substrate-artifacts
+  namespace: substrate
+spec:
+  accessModes: [ReadWriteMany]
+  # storageClassName: <a class that supports ReadWriteMany>
+  resources:
+    requests:
+      storage: 50Gi

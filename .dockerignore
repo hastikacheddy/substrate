@@ -1,0 +1,14 @@
+.git
+.github
+.pytest_cache
+**/__pycache__
+**/*.pyc
+*.sqlite3
+substrate-artifacts
+docs
+tests
+examples
+experiments
+deploy/secrets
+.env
+.env.*
