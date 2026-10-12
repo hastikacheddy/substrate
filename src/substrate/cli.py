@@ -58,6 +58,11 @@ def report(result: RunResult) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="substrate")
     sub = parser.add_subparsers(dest="command", required=True)
+    try:
+        from .control.cli import add_parser as add_platform_parser
+        add_platform_parser(sub)
+    except ImportError:
+        pass                                                      # the control plane's dependencies are optional; the command is simply absent
     cache = sub.add_parser("cache", help="audit or clean the quantum-chemistry energy cache")
     cache_sub = cache.add_subparsers(dest="action", required=True)
     cache_sub.add_parser("status", help="count the entries by state, program version and worker")
@@ -104,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
         return _transfer(args)
     if args.command == "cache":
         return _cache(args)
+    if args.command == "platform":
+        from .control.cli import run as run_platform
+        return run_platform(args)
     try:
         exp = load_experiment(args.experiment)
         n = exp.n_samples if args.samples is None else args.samples

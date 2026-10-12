@@ -20,10 +20,12 @@ FORBIDDEN_ATTRIBUTES = {("os", "system"), ("os", "popen"), ("os", "execv"), ("os
 #: modules that may start a process, and why
 PROCESS_ALLOWED = {
     "qc/__init__.py": "runs the PySCF worker (local or through WSL) with a fixed command, job data on stdin",
+    "control/sandbox.py": "runs one science step in a fresh interpreter with a deadline; answers come back as JSON bytes, never as pickles",
 }
 #: modules that may open or accept a network connection, and why
 NETWORK_ALLOWED = {
     "gui/server.py": "the local GUI, bound to 127.0.0.1",
+    "control/fabric/client.py": "the one outbound client: allowlisted hosts, HTTPS, vetted addresses, bounded size (see its tests)",
 }
 NETWORK_MODULES = {"socket", "socketserver", "http", "http.server", "http.client", "urllib", "urllib.request", "urllib3", "requests", "httpx", "aiohttp",
                    "ftplib", "smtplib", "telnetlib", "xmlrpc", "websockets"}
@@ -90,6 +92,16 @@ def test_the_allowlists_name_modules_that_exist_and_still_use_what_they_are_allo
         assert (SRC / name).is_file(), f"{name} is on an allowlist but does not exist"
     assert "subprocess" in imported(tree_of(SRC / "qc/__init__.py"))
     assert NETWORK_MODULES & imported(tree_of(SRC / "gui/server.py"))
+
+
+@pytest.mark.parametrize("path", MODULES + sorted((SRC.parent.parent / "tests").glob("*.py")), ids=lambda p: p.name)
+def test_no_source_file_contains_a_stray_control_character(path):
+    """A NUL, a backspace or a bare carriage return in source is almost always an escape sequence that was unescaped on its way into the file."""
+    text = path.read_bytes().decode("utf-8")                       # bytes, so that nothing normalises line endings before the check
+    allowed = {"\n", "\t", "\r"}
+    bad = sorted({hex(ord(c)) for c in text if ord(c) < 32 and c not in allowed})
+    assert not bad, f"{path.name} contains control characters {bad}"
+    assert "\r" not in text.replace("\r\n", ""), f"{path.name} contains a bare carriage return"
 
 
 def test_every_yaml_read_goes_through_the_safe_loader():
