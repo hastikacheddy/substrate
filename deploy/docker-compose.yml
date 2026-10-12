@@ -103,7 +103,7 @@ services:
     networks: [telemetry, monitoring]
 
   tempo:
-    image: grafana/tempo:2.6.0
+    image: grafana/tempo:3.1.0
     <<: *hardened
     user: "10001:10001"
     command: ["-config.file=/etc/tempo/tempo.yaml"]
