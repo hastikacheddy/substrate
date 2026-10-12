@@ -7,6 +7,7 @@ Who you are is given by an API key in the environment (`SUBSTRATE_API_KEY`), nev
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import threading
 import time
@@ -23,6 +24,8 @@ def add_parser(subparsers) -> None:
     platform.add_argument("--db", default=None, help=f"database URL (default: $SUBSTRATE_DB, else {DEFAULT_DB})")
     platform.add_argument("--store", default=None, help=f"artifact directory (default: $SUBSTRATE_STORE, else {DEFAULT_STORE})")
     sub = platform.add_subparsers(dest="platform_command", required=True)
+
+    sub.add_parser("check", help="exit 0 if the database answers and has its tables and a local artifact directory is writable (creates no tables; for health checks)")
 
     init = sub.add_parser("init", help="create the database, a tenant and its administrator; prints the administrator's key once")
     init.add_argument("--tenant", default="default")
@@ -116,10 +119,19 @@ def _principal(registry):
     return principal
 
 
+def _notifier():
+    """The wake-up notifier the environment asks for (a Redis URL in $SUBSTRATE_REDIS_URL or the file $SUBSTRATE_REDIS_URL_FILE), else none."""
+    from .notify import notifier_from_environment
+    try:
+        return notifier_from_environment()
+    except (ValueError, ImportError) as error:
+        raise SubstrateError(str(error)) from None
+
+
 def _orchestrator(registry, artifacts, isolation: str | None = None, observer=None):
     from .orchestrator import Orchestrator
     from .sandbox import ProcessExecutor, default_isolation
-    orchestrator = Orchestrator(registry, artifacts, observer=observer)
+    orchestrator = Orchestrator(registry, artifacts, observer=observer, notifier=_notifier())
     if (isolation or default_isolation()) == "process":
         orchestrator.executor = ProcessExecutor(quantum_policy=orchestrator.gateway.policy)
     return orchestrator
@@ -150,7 +162,33 @@ def create_server_app(registry, artifacts, orchestrator, metrics: bool = True):
     return create_app(registry, artifacts, orchestrator, metrics=observer, fabric=Fabric(registry, artifacts))
 
 
+def _check(args) -> int:
+    """Whether this process could do its work. Reads the database (and creates no tables in it), and for a local artifact directory looks that it can be written.
+    A failure is named by its type only: the message of a database error can hold the URL, and the URL holds the password."""
+    try:
+        import sqlalchemy as sa
+        from . import db
+        from .registry import Registry
+        registry = Registry(database_url(args.db), create=False)
+        with registry.engine.connect() as conn:
+            conn.execute(sa.select(sa.func.count()).select_from(db.counters)).scalar_one()
+        location = args.store or os.environ.get("SUBSTRATE_STORE", DEFAULT_STORE)
+        if not location.startswith("s3://") and not os.access(location, os.W_OK):
+            print("not ready: the artifact directory is missing or not writable", file=sys.stderr)
+            return 1
+    except SubstrateError as error:
+        print(f"not ready: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:                                    # noqa: BLE001 (any failure of the database or the driver means "not ready")
+        print(f"not ready: {type(error).__name__}", file=sys.stderr)
+        return 1
+    print("ready")
+    return 0
+
+
 def run(args) -> int:
+    if args.platform_command == "check":
+        return _check(args)
     try:
         try:
             registry, artifacts = _open(args)
@@ -189,6 +227,7 @@ def run(args) -> int:
             orchestrator = _orchestrator(registry, artifacts, args.isolation, observer)
             worker = Worker(orchestrator, queues=[q.strip() for q in args.queues.split(",") if q.strip()])
             stop = threading.Event()
+            signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())      # PID 1 in a container gets no default handler: without this, `docker stop` waits out its timeout and kills
             try:
                 if args.until_idle:
                     print(f"{worker.worker_id}: ran {worker.run_until_idle()} task(s)")
@@ -197,6 +236,7 @@ def run(args) -> int:
             except KeyboardInterrupt:
                 stop.set()
             finally:
+                worker.notifier.close()
                 if tracing:
                     tracing.shutdown()                          # sends the spans still waiting in the exporter's buffer
             return 0

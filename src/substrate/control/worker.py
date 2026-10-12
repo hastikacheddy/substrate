@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 
+from .notify import Notifier
 from .orchestrator import Orchestrator, Observer
 from .security import QuotaExceededError
 from .status import classify_failure, is_deterministic_refusal
@@ -20,13 +21,15 @@ LEASE_MARGIN_S = 60.0
 
 
 class Worker:
-    def __init__(self, orchestrator: Orchestrator, *, queues=("cpu",), worker_id: str | None = None, handlers=None, observer: Observer | None = None):
+    def __init__(self, orchestrator: Orchestrator, *, queues=("cpu",), worker_id: str | None = None, handlers=None, observer: Observer | None = None,
+                 notifier: Notifier | None = None):
         self.orchestrator = orchestrator
         self.registry, self.artifacts, self.queue = orchestrator.registry, orchestrator.artifacts, orchestrator.queue
         self.queues = tuple(queues)
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.handlers = HANDLERS if handlers is None else handlers
         self.observer = observer or orchestrator.observer
+        self.notifier = notifier or orchestrator.notifier
 
     def run_once(self) -> bool:
         """Take at most one task and finish it, one way or another. Returns whether there was one."""
@@ -40,6 +43,7 @@ class Worker:
             self._execute(task)
         finally:
             self.orchestrator.finalize_if_done(task.tenant_id, task.run_id)
+            self.notifier.publish()                                                   # what depended on this task can be claimed now, by whichever worker is idle
         return True
 
     def run_until_idle(self, max_tasks: int = 10_000) -> int:
@@ -48,10 +52,13 @@ class Worker:
             done += 1
         return done
 
-    def serve(self, stop: threading.Event, poll_s: float = 0.5) -> None:
+    def serve(self, stop: threading.Event, poll_s: float = 0.5, idle_s: float = 10.0) -> None:
+        """Run tasks until `stop` is set. With no work, wait `poll_s` and ask again; with a notifier that is connected, wait for its signal, asking anyway every `idle_s`
+        (a retry that is due after a back-off, for one, sends no signal)."""
+        self.notifier.start()
         while not stop.is_set():
             if not self.run_once():
-                stop.wait(poll_s)
+                self.notifier.wait(stop, poll_s, idle_s)
 
     # -- one task ---------------------------------------------------------------------------------------------------------------------
     def _execute(self, task: ClaimedTask) -> None:

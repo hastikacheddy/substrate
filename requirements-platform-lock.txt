@@ -1,6 +1,6 @@
-# The control plane's dependencies (the `platform`, `postgres` and `otlp` extras) and everything they pull in: one set that the whole test suite was run with on Python 3.10, 3.11 and 3.12.
+# The control plane's dependencies (the `platform`, `postgres`, `otlp`, `redis` and `s3` extras) and everything they pull in: one set that the whole test suite was run with on Python 3.10, 3.11 and 3.12.
 # This is what the container image installs and what CI audits and lists in the software bill of materials, together with the runtime pins it includes.
-# Versions only, not hashes (see requirements-lock.txt). Regenerate after a deliberate upgrade (uv pip compile pyproject.toml --extra platform --extra postgres --extra otlp --universal
+# Versions only, not hashes (see requirements-lock.txt). Regenerate after a deliberate upgrade (uv pip compile pyproject.toml --extra platform --extra postgres --extra otlp --extra redis --extra s3 --universal
 # --python-version 3.10, with requirements-lock.txt and sqlalchemy==2.0.54 as constraints), run the whole test suite on each supported Python, and run pip-audit before committing.
 # SQLAlchemy is held at the 2.0 line: 2.1 needs Python 3.11, and the code is written for the API that 1.4 and 2.x share.
 -r requirements-lock.txt
@@ -37,3 +37,12 @@ urllib3==2.8.0
 charset-normalizer==3.5.2
 certifi==2026.7.22
 idna==3.20
+# the Redis wake-up (the `redis` extra) and the S3 artifact store (the `s3` extra), with what they need
+redis==8.1.0
+async-timeout==5.0.1; python_full_version < "3.11.3"
+boto3==1.43.111
+botocore==1.43.111
+s3transfer==0.19.2
+jmespath==1.1.0
+python-dateutil==2.9.0.post0
+six==1.17.0

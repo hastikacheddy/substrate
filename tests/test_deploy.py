@@ -69,7 +69,7 @@ def test_the_extras_the_image_installs_exist_and_every_package_in_them_is_pinned
     tomllib = pytest.importorskip("tomllib")                                                      # Python 3.11 and later
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     extras = project["optional-dependencies"]
-    named = re.findall(r'\[([a-z,]+)\]"', (DEPLOY / "Dockerfile").read_text(encoding="utf-8"))
+    named = re.findall(r'\[([a-z0-9,]+)\]"', (DEPLOY / "Dockerfile").read_text(encoding="utf-8"))
     assert named and all(set(n.split(",")) <= set(extras) for n in named)
     lock = (ROOT / "requirements-platform-lock.txt").read_text(encoding="utf-8")
     pinned = {re.split(r"[=;\s]", line)[0].lower().replace("_", "-") for line in lock.splitlines() if re.match(r"[A-Za-z]", line)}
@@ -120,7 +120,7 @@ def test_no_secret_is_committed_under_deploy():
 
 # -- Compose ------------------------------------------------------------------------------------------------------------------------------
 def test_every_container_is_locked_down(compose):
-    assert set(compose["services"]) == {"db", "api", "worker", "otel-collector", "tempo", "prometheus", "grafana"}
+    assert set(compose["services"]) == {"db", "redis", "api", "worker", "otel-collector", "tempo", "prometheus", "grafana"}
     for name, service in compose["services"].items():
         assert service["read_only"] is True, name
         assert service["cap_drop"] == ["ALL"] and "cap_add" not in service, name
@@ -150,9 +150,27 @@ def test_ports_are_published_on_loopback_only_and_only_by_services_that_can_be_r
     for name, ports in published.items():
         assert all(str(p).startswith("127.0.0.1:") for p in ports), name
         assert set(compose["services"][name]["networks"]) - internal, f"{name} publishes a port but is only on internal networks (it would not work)"
-        # Run against Docker 25 / Compose 2.24: a container with a published port is created on the first network listed, and an internal network cannot carry the
-        # published port, so with an internal one first Grafana came up attached to one of its two networks only (and could not reach Prometheus, or the browser).
-        assert compose["services"][name]["networks"][0] not in internal, f"{name}: list a network with a route out first"
+
+
+def test_the_network_verifier_names_exactly_the_containers_with_missing_or_extra_networks(compose):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("verify_networks", DEPLOY / "verify_networks.py")
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    config = {"name": "substrate", "services": {n: {"networks": {x: None for x in s["networks"]}} for n, s in compose["services"].items()},
+              "networks": {k: {"name": f"substrate_{k}"} for k in compose["networks"]}}
+    wanted = verifier.expected_networks(config, "substrate")
+    assert wanted["api"] == {"substrate_frontend", "substrate_backend", "substrate_monitoring"} and wanted["db"] == {"substrate_backend"}
+
+    def container(service, number=1):
+        return {"Name": f"/substrate-{service}-{number}", "Config": {"Labels": {"com.docker.compose.service": service}},
+                "NetworkSettings": {"Networks": {n: {} for n in wanted[service]}}}
+    assert verifier.mismatches(wanted, [container(s) for s in wanted]) == []
+    lost, gained = container("api"), container("worker", 2)
+    del lost["NetworkSettings"]["Networks"]["substrate_frontend"]
+    gained["NetworkSettings"]["Networks"]["substrate_frontend"] = {}
+    assert verifier.mismatches(wanted, [container("db"), lost, gained]) == ["substrate-api-1 (api): missing substrate_frontend",
+                                                                          "substrate-worker-2 (worker): has unexpected substrate_frontend"]
 
 
 def test_the_database_and_the_workers_have_no_route_out_and_the_workers_reach_nothing_else(compose):
@@ -161,7 +179,7 @@ def test_the_database_and_the_workers_have_no_route_out_and_the_workers_reach_no
     assert set(services["db"]["networks"]) <= internal and set(services["worker"]["networks"]) <= internal
     assert set(services["worker"]["networks"]) == {"backend", "telemetry"}
     peers = {name for name, s in services.items() if name != "worker" and set(s["networks"]) & set(services["worker"]["networks"])}
-    assert peers == {"db", "api", "otel-collector"}                                           # the database and the API (backend), and the collector (telemetry)
+    assert peers == {"db", "redis", "api", "otel-collector"}                                  # the database, Redis and the API (backend), and the collector (telemetry)
     assert "frontend" not in services["worker"]["networks"] and "frontend" not in services["db"]["networks"]
     assert set(compose["networks"]) == {"frontend", "backend", "telemetry", "monitoring"} and {"backend", "telemetry", "monitoring"} <= internal
     for name, service in services.items():
@@ -642,7 +660,7 @@ def test_docker_compose_itself_accepts_the_compose_file(tmp_path):
     result = subprocess.run(["docker", "compose", "-f", str(copy / "docker-compose.yml"), "config", "--format", "json"], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stderr[-2000:]
     rendered = json.loads(result.stdout)
-    assert set(rendered["services"]) == {"db", "api", "worker", "otel-collector", "tempo", "prometheus", "grafana"}
+    assert set(rendered["services"]) == {"db", "redis", "api", "worker", "otel-collector", "tempo", "prometheus", "grafana"}
     assert rendered["services"]["worker"]["environment"]["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://otel-collector:4318"      # the merge of the shared block and the worker's own
     assert all(s["read_only"] is True and s["cap_drop"] == ["ALL"] for s in rendered["services"].values())
 
@@ -677,8 +695,8 @@ def test_ci_installs_what_the_image_installs_and_audits_every_lock_it_names():
     ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
     workflow = load(WORKFLOWS / "ci.yml")
     assert set(workflow["jobs"]) >= {"test", "core-only", "container", "audit"}
-    extras = set(re.search(r'pip install -e "\.\[([a-z,]+)\]" -c requirements-dev-lock\.txt -c requirements-platform-lock\.txt', ci).group(1).split(","))
-    shipped = {e for group in re.findall(r'\[([a-z,]+)\]"', (DEPLOY / "Dockerfile").read_text(encoding="utf-8")) for e in group.split(",")}
+    extras = set(re.search(r'pip install -e "\.\[([a-z0-9,]+)\]" -c requirements-dev-lock\.txt -c requirements-platform-lock\.txt', ci).group(1).split(","))
+    shipped = {e for group in re.findall(r'\[([a-z0-9,]+)\]"', (DEPLOY / "Dockerfile").read_text(encoding="utf-8")) for e in group.split(",")}
     assert shipped <= extras                                                                  # the tests run against everything the image contains
     for referenced in set(re.findall(r"\b(requirements[\w\-]*\.txt)\b", ci)):
         assert (ROOT / referenced).exists(), referenced

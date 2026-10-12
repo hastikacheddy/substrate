@@ -35,7 +35,7 @@ jobs:
             requirements-dev-lock.txt
             requirements-platform-lock.txt
       - name: Install (versions constrained by the lock files)
-        run: pip install -e ".[dev,platform,postgres,otlp]" -c requirements-dev-lock.txt -c requirements-platform-lock.txt
+        run: pip install -e ".[dev,platform,postgres,otlp,redis,s3]" -c requirements-dev-lock.txt -c requirements-platform-lock.txt
       - name: Tests that do not need a quantum-chemistry program
         run: python -m pytest -m "not qc" -q
 

@@ -7,10 +7,15 @@
 # What it does for safety: nothing publishes a port except on 127.0.0.1; the database and the workers are on networks with no route out; the workers can reach
 # the database and the collector and nothing else; containers run as unprivileged users with a read-only root filesystem, no Linux capabilities and no privilege
 # escalation; every secret is a file mounted under /run/secrets, never an environment value.
-# Not included: a Redis broker (the task queue lives in the database), an S3 artifact store (artifacts share a volume; the S3 store is in the code but boto3 is
-# not in the image), TLS (put a proxy in front of 127.0.0.1:8080 before exposing the API), alert delivery (Prometheus evaluates deploy/prometheus/alerts.yml; sending
-# the alerts somewhere is yours to add).
-# Not tested: tests/test_deploy.py checks this file's structure and the properties above, but it has not been run against a Docker daemon.
+# Redis is only a wake-up channel for idle workers: the task queue lives in the database, and with Redis down or absent the workers poll it as before.
+# Not included: an S3 artifact store (artifacts share a volume; the S3 store is in the image and tested against a real S3 server, but no S3 server is part of this stack;
+# set SUBSTRATE_STORE=s3://bucket/prefix, SUBSTRATE_S3_ENDPOINT and an AWS_SHARED_CREDENTIALS_FILE secret to use one), TLS (put a proxy in front of the API before
+# exposing it), alert delivery (Prometheus evaluates deploy/prometheus/alerts.yml; sending the alerts somewhere is yours to add).
+# Tested: tests/test_deploy.py checks this file's structure and the properties above, and the stack was run on Docker 25 (PostgreSQL, Redis, API, two workers, collector,
+# Tempo, Prometheus scraping with an OPERATOR key, Grafana) with a run submitted through the API and its trace found in Tempo. Not run: anything but a single host.
+# Known problem of Docker Engine 25.0 with Compose 2.24 (reproduced with a two-service alpine project, so not this file): a container is sometimes created attached to only
+# some of its networks, with no error, so it cannot reach what it should. After `up`, run `python deploy/verify_networks.py`: it compares every container's networks with
+# this file's and names the ones that are wrong (`docker compose up -d --force-recreate <service>` usually fixes it; a current Docker does not have the problem).
 
 name: substrate
 
@@ -24,6 +29,7 @@ x-hardened: &hardened
 
 x-environment: &environment
   SUBSTRATE_DB_FILE: /run/secrets/db_url
+  SUBSTRATE_REDIS_URL_FILE: /run/secrets/redis_url          # optional wake-up channel; the queue is the database, and without Redis the workers poll
   SUBSTRATE_STORE: /data/artifacts
   SUBSTRATE_IMAGE_DIGEST: ${SUBSTRATE_IMAGE_DIGEST:-}
 
@@ -33,8 +39,9 @@ x-substrate: &substrate
     context: ..
     dockerfile: deploy/Dockerfile
   user: "10001:10001"
+  init: true                                     # a small init as PID 1: reaps the processes a step leaves behind, and passes signals on
   environment: *environment
-  secrets: [db_url]
+  secrets: [db_url, redis_url]
   volumes:
     - artifacts:/data/artifacts
   <<: *hardened
@@ -58,6 +65,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    <<: *hardened
+    user: "999:999"
+    command: ["redis-server", "/run/secrets/redis_conf", "--save", "", "--appendonly", "no"]       # the password is in the secret file; nothing is persisted (a wake-up holds no data)
+    secrets: [redis_conf]
+    tmpfs: ["/tmp:size=16m", "/data:size=16m"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$(sed -n 's/^requirepass //p' /run/secrets/redis_conf | tr -d '\\r\\n')\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
     <<: *substrate
@@ -86,6 +107,13 @@ services:
       api:
         condition: service_healthy
     networks: [backend, telemetry]
+    stop_grace_period: 60s           # on SIGTERM a worker finishes the task it is running and then exits; a task that outlasts this is killed and another worker takes it over when its lease runs out
+    healthcheck:                     # not the image's HTTP check: a worker serves no HTTP
+      test: ["CMD", "python", "-m", "substrate", "platform", "check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     cpus: 2                          # service-level limits, not deploy.resources: newer Compose turns pids_limit (from the shared block) into deploy.resources.limits.pids and rejects the mix
     mem_limit: 4g
     deploy:
@@ -140,7 +168,7 @@ services:
       - ./grafana/dashboards:/etc/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     depends_on: [prometheus, tempo]
-    networks: [frontend, monitoring]       # frontend first: a container with a published port is created on the first network listed, and Docker (25) will not publish through an internal one, so with monitoring first it came up on one of the two networks only
+    networks: [frontend, monitoring]
 
 networks:
   frontend: {}                       # the only network with a route out; the API needs it to fetch datasets, Grafana to publish its port
@@ -163,6 +191,10 @@ secrets:
     file: ./secrets/db_url                       # postgresql+psycopg2://substrate:<password>@db:5432/substrate
   db_password:
     file: ./secrets/db_password
+  redis_conf:
+    file: ./secrets/redis_conf                   # one line: requirepass <password>
+  redis_url:
+    file: ./secrets/redis_url                    # redis://:<the same password>@redis:6379/0
   prometheus_token:
     file: ./secrets/prometheus_token             # an API key of an OPERATOR (`platform apikey create prometheus --role OPERATOR`)
   grafana_admin_password:

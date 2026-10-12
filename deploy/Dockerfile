@@ -8,7 +8,7 @@ WORKDIR /src
 COPY pyproject.toml README.md requirements-lock.txt requirements-platform-lock.txt ./
 COPY src ./src
 # Every wheel is built here, with the versions pinned in the lock files used as constraints, so the final image installs from this directory only.
-RUN pip wheel --wheel-dir /wheels -c requirements-platform-lock.txt ".[platform,postgres,otlp]"
+RUN pip wheel --wheel-dir /wheels -c requirements-platform-lock.txt ".[platform,postgres,otlp,redis,s3]"
 
 FROM python:3.12-slim-bookworm
 LABEL org.opencontainers.image.title="substrate control plane" \
@@ -22,7 +22,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd --system --uid 10001 --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin substrate \
  && mkdir -p /data/artifacts && chown -R 10001:10001 /data
 COPY --from=build /wheels /wheels
-RUN pip install --no-cache-dir --no-index --find-links=/wheels "substrate[platform,postgres,otlp]" && rm -rf /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels "substrate[platform,postgres,otlp,redis,s3]" && rm -rf /wheels
 USER 10001:10001
 WORKDIR /data
 EXPOSE 8080
