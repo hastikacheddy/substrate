@@ -48,7 +48,7 @@ x-substrate: &substrate
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     <<: *hardened
     user: "70:70"
     environment:
