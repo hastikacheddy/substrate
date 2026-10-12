@@ -95,11 +95,25 @@ def test_the_build_context_leaves_out_secrets_and_history():
     assert "deploy/secrets/*" in gitignore and "!deploy/secrets/README.md" in gitignore
 
 
+def publishable_files() -> list[Path]:
+    """The files under deploy/ that git would commit: tracked ones plus untracked ones that are not ignored (a developer's own secret files are ignored, so they are not these).
+    Outside a checkout, every file."""
+    try:
+        listing = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "deploy"], cwd=ROOT, capture_output=True, text=True, timeout=60)
+        if listing.returncode == 0 and listing.stdout:
+            return [ROOT / name for name in listing.stdout.split("\x00") if name and (ROOT / name).is_file()]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return [p for p in DEPLOY.rglob("*") if p.is_file()]
+
+
 def test_no_secret_is_committed_under_deploy():
-    assert sorted(p.name for p in (DEPLOY / "secrets").iterdir()) == ["README.md"]
-    pattern = re.compile(r"sbs_[A-Za-z0-9]{6,}_|-----BEGIN [A-Z ]*PRIVATE KEY|(?i:password|secret|token)\s*[:=]\s*[\"']?[A-Za-z0-9+_\-]{16,}")
-    for path in DEPLOY.rglob("*"):
-        if path.is_file() and path.suffix in (".yml", ".yaml", ".json", ".md", "") and path.name != "Dockerfile":
+    files = publishable_files()
+    assert sorted(p.name for p in files if p.parent == DEPLOY / "secrets") == ["README.md"]
+    # `existingSecret: <name>` (the chart's value) names a Kubernetes Secret object; it holds no secret, so it is the one key that is not a credential.
+    pattern = re.compile(r"sbs_[A-Za-z0-9]{6,}_|-----BEGIN [A-Z ]*PRIVATE KEY|(?<!existing)(?<!Existing)(?i:password|secret|token)\s*[:=]\s*[\"']?[A-Za-z0-9+_\-]{16,}")
+    for path in files:
+        if path.suffix in (".yml", ".yaml", ".json", ".md", "") and path.name != "Dockerfile":
             for line in path.read_text(encoding="utf-8").splitlines():
                 assert not pattern.search(line), f"{path.relative_to(ROOT)}: {line.strip()[:80]}"
 
@@ -136,6 +150,9 @@ def test_ports_are_published_on_loopback_only_and_only_by_services_that_can_be_r
     for name, ports in published.items():
         assert all(str(p).startswith("127.0.0.1:") for p in ports), name
         assert set(compose["services"][name]["networks"]) - internal, f"{name} publishes a port but is only on internal networks (it would not work)"
+        # Run against Docker 25 / Compose 2.24: a container with a published port is created on the first network listed, and an internal network cannot carry the
+        # published port, so with an internal one first Grafana came up attached to one of its two networks only (and could not reach Prometheus, or the browser).
+        assert compose["services"][name]["networks"][0] not in internal, f"{name}: list a network with a route out first"
 
 
 def test_the_database_and_the_workers_have_no_route_out_and_the_workers_reach_nothing_else(compose):
@@ -191,7 +208,7 @@ def test_the_api_and_worker_commands_are_ones_the_cli_accepts(compose):
     assert (api.platform_command, api.host, api.port, api.allow_external) == ("serve", "0.0.0.0", 8080, True)
     worker = parser.parse_args(compose["services"]["worker"]["command"])
     assert (worker.platform_command, worker.queues, worker.isolation) == ("worker", "cpu,quantum", "process")
-    assert compose["services"]["api"]["ports"] == ["127.0.0.1:8080:8080"]
+    assert compose["services"]["api"]["ports"] == ["127.0.0.1:${SUBSTRATE_API_PORT:-8080}:8080"]
     for name in ("api", "worker"):
         env = compose["services"][name]["environment"]
         assert env["SUBSTRATE_DB_FILE"] == "/run/secrets/db_url" and "db_url" in compose["services"][name]["secrets"]
@@ -389,10 +406,40 @@ def test_the_expression_checker_catches_what_it_is_for(exposed):
 
 
 # -- Kubernetes ---------------------------------------------------------------------------------------------------------------------------
+HELM = DEPLOY / "helm" / "substrate"
+
+
 @pytest.fixture(scope="module")
-def manifests() -> dict[str, list[dict]]:
+def kustomize_manifests() -> dict[str, list[dict]]:
     kustomization = load(K8S / "kustomization.yaml")
     return {name: load_all(K8S / name) for name in kustomization["resources"]}
+
+
+def find_helm() -> str | None:
+    found = shutil.which("helm")
+    if found:
+        return found
+    winget = Path.home() / "AppData" / "Local" / "Microsoft" / "WinGet" / "Links" / "helm.exe"        # where winget puts it, before a new shell has it on its path
+    return str(winget) if winget.exists() else None
+
+
+def helm_render(*settings: str) -> list[dict]:
+    """The chart as `helm template` renders it, with `--set` overrides: what a cluster would be asked to create."""
+    helm = find_helm()
+    if helm is None:
+        pytest.skip("helm is not installed")
+    command = [helm, "template", "substrate", str(HELM), "--namespace", "substrate"]
+    for setting in settings:
+        command += ["--set", setting]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr[-2000:]
+    return [d for d in yaml.safe_load_all(result.stdout) if d]
+
+
+@pytest.fixture(scope="module", params=["kustomize", "helm"])
+def manifests(request, kustomize_manifests) -> dict[str, list[dict]]:
+    """The same properties are asserted of the plain manifests and of what the chart renders by default."""
+    return kustomize_manifests if request.param == "kustomize" else {"helm": helm_render()}
 
 
 def objects(manifests, kind) -> list[dict]:
@@ -403,7 +450,8 @@ def workloads(manifests) -> list[dict]:
     return objects(manifests, "Deployment") + objects(manifests, "StatefulSet")
 
 
-def test_the_kustomization_lists_every_manifest_and_each_object_is_in_the_namespace(manifests):
+def test_the_kustomization_lists_every_manifest_and_each_object_is_in_the_namespace(kustomize_manifests):
+    manifests = kustomize_manifests
     on_disk = {p.name for p in K8S.glob("*.yaml")} - {"kustomization.yaml"}
     assert set(manifests) == on_disk
     for docs in manifests.values():
@@ -535,6 +583,52 @@ def test_the_network_is_closed_by_default_and_opened_only_where_the_design_says(
     assert dns["to"][0]["namespaceSelector"]["matchLabels"] == {"kubernetes.io/metadata.name": "kube-system"} and {p["port"] for p in dns["ports"]} == {53}
 
 
+# -- the Helm chart ------------------------------------------------------------------------------------------------------------------------
+def test_helm_lints_the_chart_without_a_warning_that_matters():
+    helm = find_helm()
+    if helm is None:
+        pytest.skip("helm is not installed")
+    result = subprocess.run([helm, "lint", str(HELM), "--strict"], capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, (result.stdout + result.stderr)[-2000:]
+
+
+def test_the_chart_can_leave_out_the_bundled_database_and_every_rule_that_names_it():
+    docs = helm_render("postgres.enabled=false")
+    assert not [d for d in docs if d["kind"] == "StatefulSet"]
+    policies = {d["metadata"]["name"]: d["spec"] for d in docs if d["kind"] == "NetworkPolicy"}
+    assert "postgres-ingress" not in policies and "postgres" not in json.dumps(policies)
+    assert "egress" not in policies["worker-egress"]                                                # a worker with no database in the cluster may reach nothing (the DNS rule is separate)
+    assert [r["ports"] for r in policies["api-egress"]["egress"]] == [[{"protocol": "TCP", "port": 443}]]
+
+
+def test_an_image_digest_replaces_the_tag_and_the_numbers_of_replicas_and_queues_follow_the_values():
+    digest = "sha256:" + "ab" * 32
+    docs = helm_render(f"image.digest={digest}", "api.replicas=3", "worker.replicas=5", "worker.queues=cpu", "image.repository=registry.example/substrate")
+    deployments = {d["metadata"]["name"]: d for d in docs if d["kind"] == "Deployment"}
+    for name, deployment in deployments.items():
+        assert deployment["spec"]["template"]["spec"]["containers"][0]["image"] == f"registry.example/substrate@{digest}", name
+    assert deployments["substrate-api"]["spec"]["replicas"] == 3 and deployments["substrate-worker"]["spec"]["replicas"] == 5
+    assert deployments["substrate-worker"]["spec"]["template"]["spec"]["containers"][0]["args"][3] == "cpu"
+
+
+def test_the_network_policies_can_be_switched_off_and_nothing_else_changes():
+    default = helm_render()
+    off = helm_render("networkPolicy.enabled=false")
+    assert not [d for d in off if d["kind"] == "NetworkPolicy"] and [d for d in default if d["kind"] == "NetworkPolicy"]
+    assert [d for d in default if d["kind"] != "NetworkPolicy"] == [d for d in off if d["kind"] != "NetworkPolicy"]
+
+
+def test_the_chart_and_the_plain_manifests_describe_the_same_workloads(kustomize_manifests):
+    helm = {d["metadata"]["name"]: d for d in helm_render() if d["kind"] in ("Deployment", "StatefulSet")}
+    plain = {o["metadata"]["name"]: o for docs in kustomize_manifests.values() for o in docs if o["kind"] in ("Deployment", "StatefulSet")}
+    assert set(helm) == set(plain)
+    for name in plain:
+        a, b = helm[name]["spec"]["template"]["spec"], plain[name]["spec"]["template"]["spec"]
+        assert a["securityContext"] == b["securityContext"] and a["containers"][0]["securityContext"] == b["containers"][0]["securityContext"], name
+        assert a["containers"][0].get("args") == b["containers"][0].get("args") and a["containers"][0]["resources"] == b["containers"][0]["resources"], name
+        assert [v["name"] for v in a["volumes"]] == [v["name"] for v in b["volumes"]], name
+
+
 # -- the real tools, when they are installed ----------------------------------------------------------------------------------------------
 def test_docker_compose_itself_accepts_the_compose_file(tmp_path):
     if shutil.which("docker") is None:
@@ -553,7 +647,8 @@ def test_docker_compose_itself_accepts_the_compose_file(tmp_path):
     assert all(s["read_only"] is True and s["cap_drop"] == ["ALL"] for s in rendered["services"].values())
 
 
-def test_kubectl_itself_renders_the_kustomization(manifests):
+def test_kubectl_itself_renders_the_kustomization(kustomize_manifests):
+    manifests = kustomize_manifests
     if shutil.which("kubectl") is None:
         pytest.skip("kubectl is not installed")
     result = subprocess.run(["kubectl", "kustomize", str(K8S)], capture_output=True, text=True, timeout=120)

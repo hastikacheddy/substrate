@@ -96,6 +96,8 @@ jobs:
         run: pip-audit -r requirements-lock.txt --strict
       - name: Known vulnerabilities in the control plane's pinned dependencies (the container image installs these)
         run: pip-audit -r requirements-platform-lock.txt --strict
+      - name: Known vulnerabilities in the pinned test dependencies
+        run: pip-audit -r requirements-dev-lock.txt --strict
       - name: Software bill of materials (CycloneDX)
         run: cyclonedx-py requirements requirements-lock.txt --of JSON -o sbom.cdx.json
       - name: Software bill of materials for the control plane (CycloneDX)
