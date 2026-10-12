@@ -95,10 +95,11 @@ queue at the ODE solver, which can integrate one problem at a time per process.
 
 ## The control plane
 
-It adds the limits of any service on top of everything above, and it has not all been run against the real thing; [platform.md](platform.md) lists exactly what has and has not. In short: the
-containers and manifests were checked, not run; PostgreSQL, the S3 store, the PubChem and RCSB adapters and the Linux-only resource limits were never exercised against a real server or
-a real kernel here; the quantum solver is a one-qubit simulator on a 2×2 problem; the queue is the database and will not serve thousands of tasks a second; the API speaks plain HTTP behind
-a proxy you supply; and a worker holds the database credential, so it is as trusted as the database ([SECURITY.md](../SECURITY.md)).
+It adds the limits of any service on top of everything above, and not all of it has been run against the real thing; [platform.md](platform.md) lists exactly what has and has not. In short:
+the stack was run on one Windows machine under Docker Desktop and on a one-node minikube cluster, not on a Linux host, a managed cloud cluster or more than one node; AWS S3 itself was not
+run (a different S3-compatible server was); no real quantum device was run, and the quantum solvers (a simulator, and Qiskit emulators of IBM devices) work on a 2×2 problem, where a noisy
+device gives a ground energy that is too high and sampling noise moves the final rates by about a fifth unless the run is seeded; the queue is the database and nothing was measured beyond a
+handful of workers; the API speaks plain HTTP behind a proxy you supply; and a worker holds the database credential, so it is as trusted as the database ([SECURITY.md](../SECURITY.md)).
 
 A reproduction is judged to a relative tolerance of 10⁻⁶ because the solver stack is not repeatable below about 10⁻⁹ even on one machine (the measurement is in [findings.md](findings.md)). A real
 difference smaller than 10⁻⁶ in an observable would be called a match.

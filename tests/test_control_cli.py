@@ -288,3 +288,83 @@ def test_a_worker_stops_on_sigterm_instead_of_waiting_to_be_killed(site):
         if worker.poll() is None:
             worker.kill()
         worker.communicate()
+
+
+# -- which quantum providers a deployment allows ------------------------------------------------------------------------------------------------
+def test_the_quantum_policy_of_the_orchestrator_comes_from_the_environment(site):
+    mp = site["monkeypatch"]
+    registry, artifacts = _open(type("A", (), {"db": None, "store": None})())
+    assert _orchestrator(registry, artifacts).gateway.policy.providers == ("simulator",)                   # the default allows the simulator only
+    mp.setenv("SUBSTRATE_QPU_PROVIDERS", "simulator,qiskit-aer,ibm")
+    mp.setenv("SUBSTRATE_QPU_HARDWARE", "ibm")
+    policy = _orchestrator(registry, artifacts).gateway.policy
+    assert policy.providers == ("simulator", "qiskit-aer", "ibm") and policy.hardware_providers == ("ibm",)
+
+
+def test_a_bad_quantum_policy_in_the_environment_stops_the_command_with_a_message(site):
+    site["monkeypatch"].setenv("SUBSTRATE_QPU_PROVIDERS", "simulator")
+    site["monkeypatch"].setenv("SUBSTRATE_QPU_HARDWARE", "ibm")
+    code, out, err = run_cli(site, "status", "RUN-000001")
+    assert code == 1 and "does not allow" in err and out == ""
+
+
+# -- a pod that starts before its database ------------------------------------------------------------------------------------------------------
+def make_flaky_registry(real, failures):
+    import sqlalchemy as sa
+    calls = {"n": 0}
+
+    def flaky(url, *a, **k):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            raise sa.exc.OperationalError("connect", {}, Exception("connection to postgresql://substrate:hunter2-not-a-real-pw@postgres:5432/substrate refused"))
+        return real(url, *a, **k)
+    return flaky, calls
+
+
+def test_serve_and_worker_wait_for_a_database_that_is_not_up_yet(site, capsys):
+    import substrate.control.registry as registry_module
+    from substrate.control.cli import _open
+    flaky, calls = make_flaky_registry(registry_module.Registry, failures=3)
+    site["monkeypatch"].setattr(registry_module, "Registry", flaky)
+    sleeps = []
+    registry, artifacts = _open(type("A", (), {"db": None, "store": None})(), wait_s=60.0, sleep=sleeps.append)
+    assert calls["n"] == 4 and sleeps == [2.0, 2.0, 2.0] and registry is not None
+    assert capsys.readouterr().err.count("waiting for the database") == 1                  # said once, not on every try
+
+
+def test_when_the_database_never_comes_up_the_message_names_the_error_type_and_not_the_url(site):
+    import substrate.control.registry as registry_module
+    from substrate.control.cli import _open
+    from substrate.errors import SubstrateError
+    flaky, calls = make_flaky_registry(registry_module.Registry, failures=10**6)
+    site["monkeypatch"].setattr(registry_module, "Registry", flaky)
+    with pytest.raises(SubstrateError) as error:
+        _open(type("A", (), {"db": None, "store": None})(), wait_s=0.05, sleep=lambda s: __import__("time").sleep(0.03))
+    assert "cannot reach the database (Exception)" in str(error.value) and "after waiting" in str(error.value)
+    assert "hunter2" not in str(error.value) and "postgres" not in str(error.value) and calls["n"] >= 2
+
+
+def test_the_other_commands_do_not_wait_and_say_so_at_once(site):
+    import substrate.control.registry as registry_module
+    from substrate.control.cli import _open
+    from substrate.errors import SubstrateError
+    flaky, calls = make_flaky_registry(registry_module.Registry, failures=10**6)
+    site["monkeypatch"].setattr(registry_module, "Registry", flaky)
+    slept = []
+    with pytest.raises(SubstrateError, match=r"^cannot reach the database \(Exception\)$"):
+        _open(type("A", (), {"db": None, "store": None})(), sleep=slept.append)
+    assert calls["n"] == 1 and slept == []
+
+
+def test_the_wait_is_configurable_and_a_nonsense_value_is_refused(monkeypatch):
+    from substrate.control.cli import _db_wait_seconds
+    from substrate.errors import SubstrateError
+    monkeypatch.delenv("SUBSTRATE_DB_WAIT_S", raising=False)
+    assert _db_wait_seconds() == 60.0
+    monkeypatch.setenv("SUBSTRATE_DB_WAIT_S", "7.5")
+    assert _db_wait_seconds() == 7.5
+    monkeypatch.setenv("SUBSTRATE_DB_WAIT_S", "-3")
+    assert _db_wait_seconds() == 0.0
+    monkeypatch.setenv("SUBSTRATE_DB_WAIT_S", "soon")
+    with pytest.raises(SubstrateError, match="number of seconds"):
+        _db_wait_seconds()

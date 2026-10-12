@@ -42,6 +42,8 @@ docker compose -f deploy/docker-compose.yml run --rm -e SUBSTRATE_API_KEY api pl
 # write the key it prints into deploy/secrets/prometheus_token (chmod 444), then:  docker compose -f deploy/docker-compose.yml restart prometheus
 ```
 
+For Kubernetes (`deploy/k8s`, `deploy/helm`) `db_url` has the host `postgres`, the name of the Service there, and not `db`: see `deploy/k8s/README.md`.
+
 `db_password` and the Redis password must contain only URL-safe characters (the generator above does) because they are embedded in URLs.
 Redis is only a wake-up channel for idle workers; if you do not want it, remove the `redis` service and the two `redis_*` secrets, and the workers poll the database instead.
 Rotate any of these by replacing the file and recreating the container that reads it; revoke an API key with `platform apikey revoke <key id>`.

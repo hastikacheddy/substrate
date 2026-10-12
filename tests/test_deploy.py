@@ -629,6 +629,14 @@ def test_an_image_digest_replaces_the_tag_and_the_numbers_of_replicas_and_queues
     assert deployments["substrate-worker"]["spec"]["template"]["spec"]["containers"][0]["args"][3] == "cpu"
 
 
+def test_the_artifact_volume_claim_survives_helm_uninstall_and_the_database_claim_is_not_the_charts_to_delete():
+    docs = helm_render()
+    claim = next(d for d in docs if d["kind"] == "PersistentVolumeClaim")
+    assert claim["metadata"]["name"] == "substrate-artifacts" and claim["metadata"]["annotations"]["helm.sh/resource-policy"] == "keep"
+    postgres = next(d for d in docs if d["kind"] == "StatefulSet")
+    assert [t["metadata"]["name"] for t in postgres["spec"]["volumeClaimTemplates"]] == ["data"]          # a StatefulSet's claims are not removed by Helm or by deleting the set
+
+
 def test_the_network_policies_can_be_switched_off_and_nothing_else_changes():
     default = helm_render()
     off = helm_render("networkPolicy.enabled=false")
