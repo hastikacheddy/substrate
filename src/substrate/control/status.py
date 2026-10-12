@@ -110,7 +110,7 @@ def classify_failure(task_kind: str, error: BaseException) -> str:
 
 def is_deterministic_refusal(error: BaseException) -> bool:
     """A refusal that a retry cannot change: the same input will be refused again."""
-    return isinstance(error, (ValidationError, ResourceLimitError, DatasetUnavailableError)) or type(error).__name__ in ("QuotaExceededError", "AuthorizationError")
+    return isinstance(error, (ValidationError, ResourceLimitError, DatasetUnavailableError)) or type(error).__name__ in ("QuotaExceededError", "AuthorizationError", "QuantumConfigurationError")
 
 
 SCIENCE_KINDS = ("solve", "translate", "uncertainty", "check", "reference", "transfer")

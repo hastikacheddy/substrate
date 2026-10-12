@@ -39,8 +39,15 @@ def test_init_creates_a_tenant_and_prints_the_administrators_key_once(tmp_path, 
     assert token.startswith("sbs_K00001_")
     registry, _ = _open(type("A", (), {"db": None, "store": None})())
     assert registry.authenticate(token).name == "admin"
-    with open(tmp_path / "p.sqlite3", "rb") as handle:
-        assert token.split("_", 2)[2].encode() not in handle.read()                          # only the hash is on disk
+    secret = token.split("_", 2)[2]
+    import sqlalchemy as sa
+    from substrate.control import db
+    with registry.engine.connect() as conn:                                                  # whatever the database: no value in any table holds the secret, only its hash
+        for table in db.metadata.sorted_tables:
+            assert not any(secret in repr(tuple(row)) for row in conn.execute(sa.select(table))), table.name
+    if (tmp_path / "p.sqlite3").exists():
+        with open(tmp_path / "p.sqlite3", "rb") as handle:
+            assert secret.encode() not in handle.read()                                      # nor the file itself
 
 
 def test_every_command_that_acts_as_someone_needs_a_valid_key(site):
@@ -231,3 +238,133 @@ def test_the_artifact_store_is_a_directory_or_an_s3_location(tmp_path, monkeypat
     assert built[-1] == ("results", "artifacts", {"endpoint_url": "http://minio:9000"})
     with pytest.raises(SubstrateError, match="s3://bucket/prefix"):
         artifact_store("s3://")
+
+
+# -- the health check, and stopping a worker ------------------------------------------------------------------------------------------------
+def test_check_succeeds_on_a_database_that_has_its_tables_and_writes_nothing(site):
+    code, out, err = run_cli(site, "check")
+    assert (code, out.strip(), err) == (0, "ready", "")
+
+
+def test_check_fails_on_an_empty_database_without_creating_its_tables(tmp_path, monkeypatch, capsys):
+    import sqlalchemy as sa
+    path = tmp_path / "empty.sqlite3"
+    monkeypatch.setenv("SUBSTRATE_DB", f"sqlite:///{path}")
+    monkeypatch.setenv("SUBSTRATE_STORE", str(tmp_path))
+    assert main(["platform", "check"]) == 1
+    assert "not ready: OperationalError" in capsys.readouterr().err
+    with sa.create_engine(f"sqlite:///{path}").connect() as conn:
+        assert sa.inspect(conn).get_table_names() == []                                    # looking did not create the schema
+
+
+def test_check_fails_on_a_missing_artifact_directory(site):
+    site["monkeypatch"].setenv("SUBSTRATE_STORE", str(site["tmp"] / "nowhere"))
+    code, out, err = run_cli(site, "check")
+    assert code == 1 and out == "" and "artifact directory" in err
+
+
+def test_check_names_only_the_type_of_a_database_failure_so_the_password_stays_out_of_the_output(site):
+    pytest.importorskip("psycopg2")
+    site["monkeypatch"].setenv("SUBSTRATE_DB", "postgresql+psycopg2://substrate:hunter2-not-a-real-pw@127.0.0.1:1/substrate")
+    code, out, err = run_cli(site, "check")
+    assert code == 1 and "not ready: OperationalError" in err and "hunter2" not in out + err and "127.0.0.1" not in out + err
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX signals: a Windows process cannot be sent SIGTERM")
+def test_a_worker_stops_on_sigterm_instead_of_waiting_to_be_killed(site):
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+    env = {**os.environ, "SUBSTRATE_DB": f"sqlite:///{site['tmp'] / 'p.sqlite3'}", "SUBSTRATE_STORE": str(site["tmp"] / "artifacts")}
+    worker = subprocess.Popen([sys.executable, "-m", "substrate", "platform", "worker", "--queues", "cpu"], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        time.sleep(4)                                                                     # imported, connected, idle and polling
+        assert worker.poll() is None
+        worker.send_signal(signal.SIGTERM)
+        assert worker.wait(timeout=10) == 0
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+        worker.communicate()
+
+
+# -- which quantum providers a deployment allows ------------------------------------------------------------------------------------------------
+def test_the_quantum_policy_of_the_orchestrator_comes_from_the_environment(site):
+    mp = site["monkeypatch"]
+    registry, artifacts = _open(type("A", (), {"db": None, "store": None})())
+    assert _orchestrator(registry, artifacts).gateway.policy.providers == ("simulator",)                   # the default allows the simulator only
+    mp.setenv("SUBSTRATE_QPU_PROVIDERS", "simulator,qiskit-aer,ibm")
+    mp.setenv("SUBSTRATE_QPU_HARDWARE", "ibm")
+    policy = _orchestrator(registry, artifacts).gateway.policy
+    assert policy.providers == ("simulator", "qiskit-aer", "ibm") and policy.hardware_providers == ("ibm",)
+
+
+def test_a_bad_quantum_policy_in_the_environment_stops_the_command_with_a_message(site):
+    site["monkeypatch"].setenv("SUBSTRATE_QPU_PROVIDERS", "simulator")
+    site["monkeypatch"].setenv("SUBSTRATE_QPU_HARDWARE", "ibm")
+    code, out, err = run_cli(site, "status", "RUN-000001")
+    assert code == 1 and "does not allow" in err and out == ""
+
+
+# -- a pod that starts before its database ------------------------------------------------------------------------------------------------------
+def make_flaky_registry(real, failures):
+    import sqlalchemy as sa
+    calls = {"n": 0}
+
+    def flaky(url, *a, **k):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            raise sa.exc.OperationalError("connect", {}, Exception("connection to postgresql://substrate:hunter2-not-a-real-pw@postgres:5432/substrate refused"))
+        return real(url, *a, **k)
+    return flaky, calls
+
+
+def test_serve_and_worker_wait_for_a_database_that_is_not_up_yet(site, capsys):
+    import substrate.control.registry as registry_module
+    from substrate.control.cli import _open
+    flaky, calls = make_flaky_registry(registry_module.Registry, failures=3)
+    site["monkeypatch"].setattr(registry_module, "Registry", flaky)
+    sleeps = []
+    registry, artifacts = _open(type("A", (), {"db": None, "store": None})(), wait_s=60.0, sleep=sleeps.append)
+    assert calls["n"] == 4 and sleeps == [2.0, 2.0, 2.0] and registry is not None
+    assert capsys.readouterr().err.count("waiting for the database") == 1                  # said once, not on every try
+
+
+def test_when_the_database_never_comes_up_the_message_names_the_error_type_and_not_the_url(site):
+    import substrate.control.registry as registry_module
+    from substrate.control.cli import _open
+    from substrate.errors import SubstrateError
+    flaky, calls = make_flaky_registry(registry_module.Registry, failures=10**6)
+    site["monkeypatch"].setattr(registry_module, "Registry", flaky)
+    with pytest.raises(SubstrateError) as error:
+        _open(type("A", (), {"db": None, "store": None})(), wait_s=0.05, sleep=lambda s: __import__("time").sleep(0.03))
+    assert "cannot reach the database (Exception)" in str(error.value) and "after waiting" in str(error.value)
+    assert "hunter2" not in str(error.value) and "postgres" not in str(error.value) and calls["n"] >= 2
+
+
+def test_the_other_commands_do_not_wait_and_say_so_at_once(site):
+    import substrate.control.registry as registry_module
+    from substrate.control.cli import _open
+    from substrate.errors import SubstrateError
+    flaky, calls = make_flaky_registry(registry_module.Registry, failures=10**6)
+    site["monkeypatch"].setattr(registry_module, "Registry", flaky)
+    slept = []
+    with pytest.raises(SubstrateError, match=r"^cannot reach the database \(Exception\)$"):
+        _open(type("A", (), {"db": None, "store": None})(), sleep=slept.append)
+    assert calls["n"] == 1 and slept == []
+
+
+def test_the_wait_is_configurable_and_a_nonsense_value_is_refused(monkeypatch):
+    from substrate.control.cli import _db_wait_seconds
+    from substrate.errors import SubstrateError
+    monkeypatch.delenv("SUBSTRATE_DB_WAIT_S", raising=False)
+    assert _db_wait_seconds() == 60.0
+    monkeypatch.setenv("SUBSTRATE_DB_WAIT_S", "7.5")
+    assert _db_wait_seconds() == 7.5
+    monkeypatch.setenv("SUBSTRATE_DB_WAIT_S", "-3")
+    assert _db_wait_seconds() == 0.0
+    monkeypatch.setenv("SUBSTRATE_DB_WAIT_S", "soon")
+    with pytest.raises(SubstrateError, match="number of seconds"):
+        _db_wait_seconds()

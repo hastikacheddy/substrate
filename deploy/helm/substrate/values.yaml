@@ -1,0 +1,46 @@
+# Defaults for the substrate chart. Everything that is a secret lives in a Secret you create yourself (see NOTES.txt); nothing secret is a value here.
+
+image:
+  repository: substrate
+  tag: dev                       # a release should use `digest` instead
+  digest: ""                     # e.g. sha256:...; when set it is used and `tag` is ignored
+  pullPolicy: IfNotPresent
+
+secrets:
+  existingSecret: substrate-secrets      # keys: db_url (always), db_password (when postgres.enabled)
+
+api:
+  replicas: 2
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+worker:
+  replicas: 2
+  queues: "cpu,quantum"          # no "chemistry": the image has no PySCF
+  isolation: process
+  resources:
+    requests: {cpu: "1", memory: 1Gi}
+    limits: {cpu: "2", memory: 4Gi}
+
+postgres:
+  enabled: true                  # a single instance for trials; use a managed PostgreSQL (enabled: false, and a db_url that points at it) for anything that matters
+  image: postgres:16-alpine
+  storage: 20Gi
+  storageClassName: ""
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {memory: 2Gi}
+
+artifacts:
+  size: 50Gi
+  storageClassName: ""           # a class that supports ReadWriteMany (the API and every worker share the directory)
+  accessModes: [ReadWriteMany]
+
+networkPolicy:
+  enabled: true
+  ingressNamespaces: [ingress-nginx, monitoring]     # namespaces whose pods may reach the API
+  dnsNamespace: kube-system
+
+serviceAccount:
+  name: substrate

@@ -48,13 +48,8 @@ def _parameter(owner: str, name: str, p) -> Quantity:
 
 def _backend(block) -> dict:
     """The experiment's `backend:` block, normalised, or refused if it names a backend this package does not provide."""
-    from .qpu import backend_from_config
-    if block is not None and not isinstance(block, dict):
-        raise ValidationError(f"`backend` must be a mapping with a type and a provider (got {type(block).__name__})")
-    block = dict(block or {})
-    backend_from_config(block)                                    # raises ValidationError for anything unavailable
-    kind = block.get("type", "classical")
-    return {"type": kind, "provider": block.get("provider", "scipy" if kind == "classical" else "simulator"), **({"device": str(block["device"])} if "device" in block else {})}
+    from .qpu import check_backend_block
+    return check_backend_block(block)                             # raises ValidationError for anything unavailable; builds nothing (an emulator is slow to start)
 
 
 def parse_experiment(raw: dict) -> Experiment:
