@@ -5,8 +5,9 @@ Three pieces:
 * **A statevector simulator** for small circuits (H, X, Y, Z, S, T, rotations, CX, CZ), exact, in NumPy. Qubit q is bit q of the basis index (qubit 0 is the least significant),
   the convention Qiskit uses.
 * **`QuantumPolicy`**, what a job may ask for: which providers, how many qubits, how deep, how many gates, how many shots, how many circuits. A job outside the policy
-  is refused with a `QuantumPolicyError` *before* anything runs. Hardware providers would sit behind the same check plus a per-user quota (see `control.gateway`); no
-  hardware provider is included in this package.
+  is refused with a `QuantumPolicyError` *before* anything runs. Hardware providers sit behind the same check plus a per-user quota (see `control.gateway`). The
+  simulator is the only provider in the base package; `qpu_qiskit` (extra `qiskit`) adds Qiskit's ideal simulator, noisy emulators of real IBM devices, and IBM's devices
+  themselves for a deployment that supplies credentials.
 * **`QuantumSolverBackend`**, which diagonalises the two-level valence-bond Hamiltonians the electronic engines build by a variational calculation on one qubit: an `RY(theta)`
   ansatz, a coarse scan to find the basin, then Newton steps with derivatives from the parameter-shift rule, every energy an expectation value taken from the simulated circuit.
   It refuses anything that is not a real symmetric 2x2 matrix instead of quietly using a classical routine, so a run that says "quantum" is one.
@@ -14,12 +15,14 @@ Three pieces:
 from __future__ import annotations
 
 import math
+import os
+import re
 from dataclasses import dataclass
 
 import numpy as np
 
 from .backends import ClassicalBackend
-from .errors import ResourceLimitError, ValidationError
+from .errors import ResourceLimitError, SubstrateError, ValidationError
 
 ONE_QUBIT = {"h", "x", "y", "z", "s", "t", "rx", "ry", "rz"}
 TWO_QUBIT = {"cx", "cz"}
@@ -28,6 +31,14 @@ PARAMETRIC = {"rx", "ry", "rz"}
 
 class QuantumPolicyError(ResourceLimitError):
     """A quantum job asked for more than the policy allows, or for a provider it does not allow. Nothing was run."""
+
+
+class QuantumProviderError(SubstrateError):
+    """A quantum provider could not be used: its service did not answer, or the backend asked for is not there. A retry may help. (An execution failure, not a physics one.)"""
+
+
+class QuantumConfigurationError(QuantumProviderError):
+    """A quantum provider is not set up in this deployment: no credentials, no Qiskit, no such emulated device. Nothing a retry can change."""
 
 
 # -- circuits ------------------------------------------------------------------------------------------------------------------------------
@@ -165,6 +176,42 @@ class StatevectorSimulator:
         return float(value.real)
 
 
+def check_two_by_two(matrices) -> np.ndarray:
+    """`matrices` as a float array of real symmetric 2x2 matrices (any batch shape), or ValidationError: what a one-qubit variational solver can diagonalise."""
+    h = np.asarray(matrices, dtype=float)
+    if h.ndim < 2 or h.shape[-2:] != (2, 2):
+        raise ValidationError(f"the quantum solver diagonalises 2x2 Hamiltonians (one qubit); got matrices of shape {h.shape[-2:] if h.ndim >= 2 else h.shape}")
+    if not np.all(np.isfinite(h)):
+        raise ValidationError("the quantum solver was given a Hamiltonian with NaN or infinite entries")
+    scale = max(float(np.max(np.abs(h))), 1e-300)
+    if not np.allclose(h[..., 0, 1], h[..., 1, 0], rtol=0, atol=1e-10 * scale):
+        raise ValidationError("the quantum solver needs real symmetric Hamiltonians")
+    return h
+
+
+_PROVIDER_NAME = re.compile(r"[a-z0-9][a-z0-9._\-]{0,39}")
+
+
+def policy_from_environment(environ=None) -> QuantumPolicy:
+    """The quantum policy a deployment asks for: $SUBSTRATE_QPU_PROVIDERS (comma-separated provider names, default `simulator`) and $SUBSTRATE_QPU_HARDWARE (the ones among
+    them that are physical devices and so are charged to the submitter's quota; default none). Everything else keeps the policy's defaults. Raises ValidationError."""
+    environ = os.environ if environ is None else environ
+
+    def names(variable: str, default: tuple[str, ...]) -> tuple[str, ...]:
+        raw = (environ.get(variable) or "").strip()
+        if not raw:
+            return default
+        found = tuple(part.strip() for part in raw.split(",") if part.strip())
+        for name in found:
+            if not _PROVIDER_NAME.fullmatch(name):
+                raise ValidationError(f"{variable}: '{name[:40]}' is not a provider name (lower-case letters, digits, . _ -)")
+        return tuple(dict.fromkeys(found))
+    providers, hardware = names("SUBSTRATE_QPU_PROVIDERS", ("simulator",)), names("SUBSTRATE_QPU_HARDWARE", ())
+    if not set(hardware) <= set(providers):
+        raise ValidationError(f"SUBSTRATE_QPU_HARDWARE names {sorted(set(hardware) - set(providers))}, which SUBSTRATE_QPU_PROVIDERS does not allow")
+    return QuantumPolicy(providers=providers, hardware_providers=hardware)
+
+
 # -- the variational solver --------------------------------------------------------------------------------------------------------------
 class QuantumSolverBackend(ClassicalBackend):
     """Diagonalises batches of real symmetric 2x2 matrices on a simulated qubit. The ODE and tridiagonal routines are inherited unchanged (classical)."""
@@ -192,14 +239,7 @@ class QuantumSolverBackend(ClassicalBackend):
         return h00 * psi[..., 0] ** 2 + 2.0 * h01 * psi[..., 0] * psi[..., 1] + h11 * psi[..., 1] ** 2
 
     def symmetric_eigh(self, matrices):
-        h = np.asarray(matrices, dtype=float)
-        if h.ndim < 2 or h.shape[-2:] != (2, 2):
-            raise ValidationError(f"the quantum solver diagonalises 2x2 Hamiltonians (one qubit); got matrices of shape {h.shape[-2:] if h.ndim >= 2 else h.shape}")
-        if not np.all(np.isfinite(h)):
-            raise ValidationError("the quantum solver was given a Hamiltonian with NaN or infinite entries")
-        scale = max(float(np.max(np.abs(h))), 1e-300)
-        if not np.allclose(h[..., 0, 1], h[..., 1, 0], rtol=0, atol=1e-10 * scale):
-            raise ValidationError("the quantum solver needs real symmetric Hamiltonians")
+        h = check_two_by_two(matrices)
         batch = h.shape[:-2]
         size = int(np.prod(batch)) if batch else 1
         evaluations = size * self.EVALUATIONS                                  # what the policy is asked about is exactly what will be run
@@ -227,16 +267,55 @@ class QuantumSolverBackend(ClassicalBackend):
         return evals, evecs
 
 
-def backend_from_config(config: dict | None, policy: QuantumPolicy | None = None):
-    """The solver backend an experiment's `backend:` block asks for. Anything that is not a combination this package provides is refused."""
+QISKIT_PROVIDERS = ("qiskit-aer", "qiskit-fake", "ibm")
+_DEVICE_NAME = re.compile(r"[a-z0-9_\-]{1,60}")
+
+
+def check_backend_block(config) -> dict:
+    """An experiment's `backend:` block, validated and normalised, without building anything (parsing an experiment must not start an emulator). Keeps `device`, and for the
+    Qiskit providers `shots` and `seed`; refuses anything that is not a combination this package provides."""
+    if config is not None and not isinstance(config, dict):
+        raise ValidationError(f"`backend` must be a mapping with a type and a provider (got {type(config).__name__})")
     config = dict(config or {})
-    kind, provider = config.get("type", "classical"), config.get("provider", "scipy" if config.get("type", "classical") == "classical" else "simulator")
-    unknown = set(config) - {"type", "provider", "device"}
+    unknown = set(config) - {"type", "provider", "device", "shots", "seed"}
     if unknown:
-        raise ValidationError(f"a backend block takes only type, provider and device (got {sorted(unknown)})")
-    if kind == "classical" and provider == "scipy":
+        raise ValidationError(f"a backend block takes only type, provider, device, shots and seed (got {sorted(unknown)})")
+    kind = config.get("type", "classical")
+    provider = config.get("provider", "scipy" if kind == "classical" else "simulator")
+    sampling = kind == "quantum" and provider in QISKIT_PROVIDERS
+    if not ((kind == "classical" and provider == "scipy") or (kind == "quantum" and provider == "simulator") or sampling):
+        available = "classical/scipy, quantum/simulator, quantum/" + ", quantum/".join(QISKIT_PROVIDERS) + " (the last three need the qiskit extra)"
+        raise ValidationError(f"backend {kind}/{provider} is not available (have: {available})")
+    block = {"type": kind, "provider": provider}
+    if "device" in config:
+        block["device"] = str(config["device"])
+    if sampling:
+        if provider in ("qiskit-fake", "ibm") and not block.get("device"):
+            raise ValidationError(f"the {provider} provider needs a device (for example device: {'sherbrooke' if provider == 'qiskit-fake' else 'an IBM backend name'})")
+        if "device" in block and not _DEVICE_NAME.fullmatch(block["device"]):
+            raise ValidationError("a device name uses lower-case letters, digits, - and _ (up to 60 characters)")
+        shots, seed = config.get("shots"), config.get("seed")
+        if "shots" in config:
+            if isinstance(shots, bool) or not isinstance(shots, int) or not 1 <= shots <= 10**7:
+                raise ValidationError(f"shots must be a whole number from 1 to 10,000,000 (got {shots!r})")
+            block["shots"] = shots
+        if "seed" in config:
+            if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**31:
+                raise ValidationError("seed must be a whole number from 0 to 2147483647")
+            block["seed"] = seed
+    elif "shots" in config or "seed" in config:
+        raise ValidationError("shots and seed apply only to a sampling provider (" + ", ".join(QISKIT_PROVIDERS) + ")")
+    return block
+
+
+def backend_from_config(config: dict | None, policy: QuantumPolicy | None = None, environ=None):
+    """The solver backend an experiment's `backend:` block asks for. Anything that is not a combination this package provides is refused. `environ` is where a hardware
+    provider looks for its credentials (the process environment when None; a sandboxed step has none, by design)."""
+    block = check_backend_block(config)
+    kind, provider = block["type"], block["provider"]
+    if kind == "classical":
         return ClassicalBackend()
-    if kind == "quantum" and provider == "simulator":
+    if provider == "simulator":
         return QuantumSolverBackend(policy)
-    available = "classical/scipy, quantum/simulator"
-    raise ValidationError(f"backend {kind}/{provider} is not available (have: {available}); a hardware provider needs a gateway with credentials that this deployment does not have")
+    from .qpu_qiskit import qiskit_backend                          # imported only when asked for: Qiskit is an optional extra and a slow import
+    return qiskit_backend(provider, block.get("device"), block.get("shots"), policy or QuantumPolicy(), environ, block.get("seed"))
