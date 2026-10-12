@@ -11,6 +11,7 @@ from ..limits import whole_number
 from ..pipeline import Pipeline
 from .artifacts import Artifacts
 from .gateway import QPUGateway
+from .notify import Notifier
 from .registry import Registry
 from .repro import compare_summaries, environment_fingerprint, environment_hash
 from .security import Action, Principal
@@ -41,13 +42,14 @@ class Observer:
 
 class Orchestrator:
     def __init__(self, registry: Registry, artifacts: Artifacts, *, pipeline: Pipeline | None = None, executor=None, observer: Observer | None = None,
-                 gateway: QPUGateway | None = None):
+                 gateway: QPUGateway | None = None, notifier: Notifier | None = None):
         from ..defaults import default_registry
         self.registry, self.artifacts = registry, artifacts
         self.pipeline = pipeline or Pipeline(default_registry())
         self.gateway = gateway or QPUGateway(registry)
         self.executor = executor or InlineExecutor(self.gateway.policy)
         self.observer = observer or Observer()
+        self.notifier = notifier or Notifier()                                               # tells idle workers that there is something to claim; the queue stays the database
         self.queue = TaskQueue(registry)
 
     # -- beginning ----------------------------------------------------------------------------------------------------------------
@@ -102,6 +104,7 @@ class Orchestrator:
             self.observer.blocked("submit")
             raise
         self.observer.run_submitted(run)
+        self.notifier.publish()
         return run
 
     def reproduce(self, principal: Principal, run_id: str) -> dict:

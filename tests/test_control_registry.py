@@ -428,6 +428,6 @@ def test_other_databases_create_the_schema_without_a_lock(tmp_path, monkeypatch)
     calls = []
     monkeypatch.setattr(db.metadata, "create_all", lambda bind: calls.append(bind))
     registry = Registry.__new__(Registry)
-    registry.engine = db.make_engine(f"sqlite:///{tmp_path / 'x.sqlite3'}")
+    registry.engine = sa.create_engine(f"sqlite:///{tmp_path / 'x.sqlite3'}", future=True)     # not db.make_engine: on a PostgreSQL test run that would be redirected
     registry._create_schema()
     assert calls == [registry.engine]
