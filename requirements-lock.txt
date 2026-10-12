@@ -5,4 +5,4 @@
 # deliberate upgrade with `pip list --format=freeze` in a clean environment and rerun the whole test suite before committing.
 numpy==1.26.4
 scipy==1.14.0
-PyYAML==6.0.1
+PyYAML==6.0.3
