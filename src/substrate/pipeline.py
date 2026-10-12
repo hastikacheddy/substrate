@@ -120,6 +120,10 @@ class Pipeline:
             previous = name
         return list(wf.run().values())
 
+    def apply_step(self, step: Step, system: ScientificSystem) -> ScientificSystem:
+        """Run one planned step on a system (the unit a distributed worker executes)."""
+        return self._apply(step, system)
+
     def _apply(self, step: Step, system: ScientificSystem) -> ScientificSystem:
         started = time.perf_counter()
         warnings: list[str] = []
@@ -150,6 +154,7 @@ class Pipeline:
             approximations=list(step.component.approximations),
             warnings=warnings,
             seconds=time.perf_counter() - started,
+            discarded=list(getattr(step.component, "discarded", ())),
         ))
         return out
 

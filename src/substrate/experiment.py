@@ -21,6 +21,7 @@ class Experiment:
     n_samples: int = 0
     seed: int = 0
     notes: dict = field(default_factory=dict)
+    backend: dict = field(default_factory=lambda: {"type": "classical", "provider": "scipy"})   # which solver the engines run on (see `qpu.backend_from_config`)
 
 
 def read_spec(path: str | Path) -> dict:
@@ -43,6 +44,17 @@ def _parameter(owner: str, name: str, p) -> Quantity:
         if np.any(np.asarray(q.sigma, dtype=float) < 0):
             raise ValidationError(f"experiment '{owner}': the sigma of parameter '{name}' must not be negative")
     return q
+
+
+def _backend(block) -> dict:
+    """The experiment's `backend:` block, normalised, or refused if it names a backend this package does not provide."""
+    from .qpu import backend_from_config
+    if block is not None and not isinstance(block, dict):
+        raise ValidationError(f"`backend` must be a mapping with a type and a provider (got {type(block).__name__})")
+    block = dict(block or {})
+    backend_from_config(block)                                    # raises ValidationError for anything unavailable
+    kind = block.get("type", "classical")
+    return {"type": kind, "provider": block.get("provider", "scipy" if kind == "classical" else "simulator"), **({"device": str(block["device"])} if "device" in block else {})}
 
 
 def parse_experiment(raw: dict) -> Experiment:
@@ -78,6 +90,7 @@ def parse_experiment(raw: dict) -> Experiment:
             n_samples=whole_number(system.name, "ensemble n_samples", ensemble.get("n_samples", 0), minimum=0, maximum="max_ensemble"),
             seed=whole_number(system.name, "ensemble seed", ensemble.get("seed", 0)),
             notes=notes,
+            backend=_backend(spec.get("backend")),
         )
     except KeyError as e:
         raise ValidationError(f"experiment spec is missing {e}") from None

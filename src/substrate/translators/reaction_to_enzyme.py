@@ -46,6 +46,11 @@ class ReactionToEnzyme(Translator):
         "the chemistry is a rate constant: this is valid only if the chemical step is slow compared with vibrational "
         "relaxation within the complex",
     )
+    discarded = (
+        "the time course of the reaction: the concentrations, the relaxation time and the equilibrium populations are dropped, and only the two rate constants cross",
+        "the correlation between the forward and reverse rate: each keeps its own uncertainty, but their shared origin is not represented here",
+        "the isotope identity of the rates beyond their values",
+    )
 
     def validate(self, system: ScientificSystem) -> list[ValidationIssue]:
         s = system.structure

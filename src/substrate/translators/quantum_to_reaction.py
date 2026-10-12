@@ -38,6 +38,12 @@ class QuantumToReaction(Translator):
         "reverse rate from detailed balance with well partition functions built from the same levels",
         "localised levels carry a systematic error bounded by the tunnel splitting (Dirichlet truncation)",
     )
+    discarded = (
+        "the wave functions and the shape of the potential: only level energies, transmission probabilities and attempt frequencies are used",
+        "coherent dynamics: the tunnel splitting is replaced by incoherent hopping between localised levels",
+        "levels at or above the barrier top, which are not part of either well's population",
+        "the per-level detail of the rate, kept only as the fraction of flux each level carries",
+    )
 
     #: warn when the barrier above the reactant ground state is less than this many kT
     MIN_BARRIER_KT = 5.0

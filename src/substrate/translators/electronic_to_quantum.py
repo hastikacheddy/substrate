@@ -37,6 +37,12 @@ class ElectronicToQuantum(Translator):
         "the scanned coordinate is the only nuclear degree of freedom; its mass is the bare particle mass",
         "the surface is carried as a table and splined by the quantum engine, so scan resolution limits accuracy",
     )
+    discarded = (
+        "the excited-state surface and the electronic gap: only the ground-state energy E0(x) crosses",
+        "the donor-acceptor distance as a variable: the heavy atoms are held at the scan's distance, so the coordinate that tunes the barrier is gone",
+        "the diabatic states, the ground state's character and the parameters that produced the surface, with their uncertainties",
+        "the surface outside the scanned range: the quantum engine sees a table, not the function",
+    )
 
     def validate(self, system: ScientificSystem) -> list[ValidationIssue]:
         x = system.obs("scan_coordinate", "angstrom", default=None)

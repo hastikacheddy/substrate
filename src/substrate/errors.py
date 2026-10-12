@@ -18,6 +18,10 @@ class ValidationError(SubstrateError):
         self.issues = tuple(issues)
 
 
+class DatasetUnavailableError(SubstrateError):
+    """A dataset an experiment is pinned to is not in the registry (or not at the pinned version). Retrying cannot bring it back."""
+
+
 class QCError(SubstrateError):
     """A quantum-chemistry program could not be run or failed. An environment problem, not a validity problem, so it is
     deliberately not a ValidationError: ensembles drop invalid draws, but a missing program must stop the run."""

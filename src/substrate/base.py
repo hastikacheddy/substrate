@@ -51,6 +51,7 @@ class Translator(ABC):
     target_kind: str                  # the model kind of the system this translator produces
     source_kinds: tuple[str, ...] = ()   # model kinds it accepts; empty means any kind at `source`
     approximations: tuple[str, ...] = ()
+    discarded: tuple[str, ...] = ()   # what the source system holds that the target does not: coarse-graining throws information away, and this says which
 
     def accepts(self, kind: str | None) -> bool:
         return not self.source_kinds or kind is None or kind in self.source_kinds
@@ -66,6 +67,20 @@ class Registry:
     def __init__(self):
         self._engines: dict[tuple[Scale, str], Engine] = {}
         self._translators: list[Translator] = []
+
+    @property
+    def engines(self) -> list[Engine]:
+        """Every registered engine once, in registration order (an engine that claims several kinds is listed once)."""
+        seen, out = set(), []
+        for engine in self._engines.values():
+            if id(engine) not in seen:
+                seen.add(id(engine))
+                out.append(engine)
+        return out
+
+    @property
+    def translators(self) -> list[Translator]:
+        return list(self._translators)
 
     def register_engine(self, engine: Engine) -> None:
         for kind in engine.kinds:

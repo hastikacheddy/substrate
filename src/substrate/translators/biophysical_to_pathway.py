@@ -49,6 +49,11 @@ class BiophysicalToPathway(Translator):
         "the pathway topology, transport, downstream consumption and enzyme abundance are supplied inputs",
         "a single enzyme species at a fixed total concentration: no expression, degradation or regulation",
     )
+    discarded = (
+        "the enzyme cycle's individual rate constants and its intermediate states: the pathway sees only an apparent kcat, KM and (if reversible) a reverse kcat and product KM",
+        "the binding and release steps and the conformational detail of the cycle, which are folded into those apparent constants",
+        "how kinetics depend on enzyme concentration outside the quasi-steady-state regime",
+    )
 
     def validate(self, system: ScientificSystem) -> list[ValidationIssue]:
         if system.obs("kcat", default=None) is None or system.obs("KM", default=None) is None:

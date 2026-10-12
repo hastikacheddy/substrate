@@ -30,6 +30,12 @@ class ElectronicToMolecular(Translator):
         "collinear heavy atom - proton - heavy atom geometry: the two heavy atoms share one mass",
         "the surface is carried as a table; its resolution and range bound the accuracy of the molecular analysis",
     )
+    discarded = (
+        "the excited-state surface and the electronic gap: only the ground-state energy E0(x, R) crosses",
+        "the diabatic states and the ground state's character (how much reactant and product it is, at each geometry)",
+        "the parameters that produced the surface (coupling, Morse curves, offset) and their uncertainties: an ensemble reaches them by re-running the chain, not through this hop",
+        "everything that is not a mass, the temperature or the surface: the identity of the atoms is reduced to their masses",
+    )
 
     def validate(self, system: ScientificSystem) -> list[ValidationIssue]:
         x = system.obs("surface_x", "angstrom", default=None)

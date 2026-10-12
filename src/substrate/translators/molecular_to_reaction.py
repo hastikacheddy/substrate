@@ -35,6 +35,13 @@ class MolecularToReaction(Translator):
         "harmonic partition functions; translations and rotations cancel between reactant and TS",
         "a single reactant and a single product well; reverse rate from the product's own free-energy barrier",
     )
+    discarded = (
+        "the surface itself and the geometry of the stationary points: two rate constants cross, not the potential energy landscape",
+        "the vibrational frequencies and zero-point energies that make up the free-energy barriers: the two barrier heights are kept, as metadata",
+        "the tunnelling parameter: it is carried as metadata but not applied, so the rate has no tunnelling correction",
+        "the distance dependence of the barrier: the rates are for one donor-acceptor distance",
+        "isotope identity beyond what is already in the two rates",
+    )
 
     def validate(self, system: ScientificSystem) -> list[ValidationIssue]:
         needed = ("rate_tst_forward", "rate_tst_reverse", "delta_g_forward", "delta_g_reverse", "tunnelling_parameter")

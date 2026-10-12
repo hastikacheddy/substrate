@@ -23,6 +23,7 @@ DEFAULTS: dict[str, int] = {
     "max_atoms": 50,                       # atoms in one quantum-chemistry job
     "max_references": 60,                  # surfaces in one transfer study (its cost grows with the square)
     "max_spec_bytes": 1_000_000,           # size of an experiment file
+    "max_artifact_bytes": 268_435_456,     # one stored artifact (256 MiB)
 }
 
 

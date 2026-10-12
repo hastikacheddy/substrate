@@ -32,7 +32,7 @@ def clean_environment(monkeypatch):
 def test_the_documented_defaults_are_the_defaults():
     """These numbers are quoted in SECURITY.md and docs/architecture.md: changing one is a decision, so it has to change here too."""
     assert DEFAULTS == {"max_ensemble": 2_000, "max_grid_points": 1_000_000, "max_qc_jobs": 2_000, "max_expensive_qc_jobs": 200,
-                        "max_atoms": 50, "max_references": 60, "max_spec_bytes": 1_000_000}
+                        "max_atoms": 50, "max_references": 60, "max_spec_bytes": 1_000_000, "max_artifact_bytes": 268_435_456}
 
 
 def test_each_limit_has_a_default_and_an_environment_variable_that_replaces_it(monkeypatch):

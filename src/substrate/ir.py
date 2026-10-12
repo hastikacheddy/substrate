@@ -98,6 +98,7 @@ class ProvenanceRecord:
     approximations: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     seconds: float = 0.0
+    discarded: list[str] = field(default_factory=list)       # information the step's source held and its output does not (set by translators)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
