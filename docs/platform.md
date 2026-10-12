@@ -236,6 +236,14 @@ vulnerability audit of every lock file, and CodeQL; the Linux-only resource limi
   different seeds are not. An experiment's `shots` and `seed` were silently dropped by the experiment parser until a seeded run failed to reproduce; they are kept now, and parsing no longer builds the
   emulator (a run on an emulated device took 82 s before that; a seeded Aer run takes 2 to 5 s now, and the emulated-device run was not timed again).
 
+**Image upgrades Dependabot proposed, tried in a scratch copy of the Compose file on 12 October 2026 (none applied):** `otel/opentelemetry-collector-contrib` 0.162.0 and `prom/prometheus` v3.15.0 work with the
+current configuration (runs succeed and reproduce, all seven spans of a run arrive through the new collector, Prometheus scrapes the API and loads the six alert rules; the collector warns that the `otlphttp` name
+is deprecated in favour of `otlp_http`). The others do not work as the files stand: `grafana/tempo` 3.1.0 rejects `tempo.yaml` (`field compactor not found`); `grafana/grafana` 13.2.3 cannot register its built-in
+Prometheus data source under the read-only root filesystem (its plugin installer fails with "read-only file system"); `postgres` 18 refuses the mount at `/var/lib/postgresql/data` (its images keep a
+version-specific directory under `/var/lib/postgresql`, and a version 16 volume cannot be opened by it without a dump and restore); and `python` 3.14 cannot build the image, because the locked scientific
+wheels have none for it. The numpy, scipy and pyyaml bumps change the locked runtime: numpy 2.2.6 passed the whole suite in an earlier local run, but they were not run through the studies, so they are a
+decision for whoever owns the numbers.
+
 Not verified, and not claimed:
 
 - **No real quantum device was run.** The `ibm` provider needs a token that only a deployment supplies, and none was available. It was written from the runtime's documented interface and tested against stand-ins
