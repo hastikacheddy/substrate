@@ -1,0 +1,126 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default deny, then exactly what is needed. A NetworkPolicy only works if the cluster's network plugin enforces it (Calico, Cilium, ...); on one that does not, these objects are
+# accepted and do nothing.
+#
+#   API      <- the namespaces listed in networkPolicy.ingressNamespaces
+#   API      -> PostgreSQL, DNS, and the public internet on 443 minus every private, link-local and cloud-metadata address (to fetch datasets)
+#   workers  -> PostgreSQL and DNS only
+#   PostgreSQL <- the API and the workers
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  labels:
+    {{- include "substrate.partOf" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  labels:
+    {{- include "substrate.partOf" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-ingress
+  labels:
+    {{- include "substrate.partOf" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: substrate-api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: {{ toJson .Values.networkPolicy.ingressNamespaces }}
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-egress
+  labels:
+    {{- include "substrate.partOf" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: substrate-api}
+  policyTypes: [Egress]
+  egress:
+    {{- if .Values.postgres.enabled }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
+      ports:
+        - {protocol: TCP, port: 5432}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16          # link-local, including the cloud metadata service at 169.254.169.254
+              - 100.64.0.0/10           # carrier-grade NAT, used for node addresses on some clouds
+              - 127.0.0.0/8
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-egress
+  labels:
+    {{- include "substrate.partOf" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: substrate-worker}
+  policyTypes: [Egress]
+  {{- if .Values.postgres.enabled }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgres}
+      ports:
+        - {protocol: TCP, port: 5432}
+  {{- end }}
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  labels:
+    {{- include "substrate.partOf" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: postgres}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: substrate-api}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: substrate-worker}
+      ports:
+        - {protocol: TCP, port: 5432}
+{{- end }}
+{{- end }}

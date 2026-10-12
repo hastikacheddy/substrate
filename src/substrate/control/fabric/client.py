@@ -145,7 +145,9 @@ class SafeHTTPClient:
         return addresses[0]
 
     # -- fetching ---------------------------------------------------------------------------------------------------------------------
-    def fetch(self, url: str, *, headers: dict[str, str] | None = None) -> Response:
+    def fetch(self, url: str, *, headers: dict[str, str] | None = None, assume_type: str | None = None) -> Response:
+        """GET `url`. `assume_type` is the content type to take a response to have when the server sends none at all (JPL's catalog server is one); a type that is sent
+        and is not accepted is still refused."""
         current = url
         for hop in range(MAX_REDIRECTS + 1):
             for attempt in range(self.retries + 1):
@@ -167,6 +169,8 @@ class SafeHTTPClient:
             if status != 200:
                 raise FetchError(f"{redact_url(current)} answered {status}")
             content_type = response_headers.get("content-type", "").split(";")[0].strip().lower()
+            if not content_type and assume_type in ALLOWED_TYPES:
+                content_type = assume_type
             if content_type not in ALLOWED_TYPES:
                 raise FetchError(f"{redact_url(current)} answered with a content type that is not accepted ('{content_type}')")
             return Response(redact_url(current), status, content_type, body, self.clock())

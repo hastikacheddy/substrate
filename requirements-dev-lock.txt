@@ -1,9 +1,19 @@
 # The test environment: the runtime pins plus pytest and what it needs, as used for the project's tests.
-# CI installs with `pip install -e ".[dev]" -c requirements-dev-lock.txt`: a constraint, so anything not listed here (the backports pytest needs
-# on Python 3.10, for example) is still resolved normally.
+# CI installs with `pip install -e ".[dev]" -c requirements-dev-lock.txt`: a constraint, so anything not listed here is still resolved normally.
+# Regenerate with uv pip compile pyproject.toml --extra dev --universal --python-version 3.10 (requirements-lock.txt as a constraint), and rerun the whole test suite.
 -r requirements-lock.txt
-pytest==9.0.3
-iniconfig==2.3.0
-packaging==23.2
-pluggy==1.6.0
+anyio==4.15.1
+certifi==2026.7.22
 colorama==0.4.6; sys_platform == "win32"
+exceptiongroup==1.3.1; python_full_version < "3.11"
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.6.0
+pygments==2.21.0
+pytest==9.1.1
+tomli==2.5.0; python_full_version < "3.11"
+typing-extensions==4.16.0; python_full_version < "3.15"

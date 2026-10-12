@@ -1,0 +1,9 @@
+apiVersion: v2
+name: substrate
+description: The substrate control plane (API and workers) with an optional single PostgreSQL, hardened for the restricted Pod Security Standard and closed to the network by default.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+sources:
+  - https://github.com/hastikacheddy/substrate
