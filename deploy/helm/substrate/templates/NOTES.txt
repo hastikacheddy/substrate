@@ -1,0 +1,20 @@
+substrate {{ .Chart.AppVersion }} is installed in the namespace "{{ .Release.Namespace }}" as release "{{ .Release.Name }}".
+
+Before the pods can start, the Secret "{{ .Values.secrets.existingSecret }}" must exist in this namespace:
+
+  kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.secrets.existingSecret }} \
+    --from-file=db_url=<file holding the SQLAlchemy URL>{{ if .Values.postgres.enabled }} --from-file=db_password=<file holding the PostgreSQL password>{{ end }}
+
+The database URL names this chart's PostgreSQL Service, "postgres" (not "db", which is what docker-compose.yml calls it):
+postgresql+psycopg2://substrate:<the password in db_password>@postgres:5432/substrate. See deploy/secrets/README.md for how to make the files. Then create the first
+tenant and its administrator, which prints the key once:
+
+  kubectl -n {{ .Release.Namespace }} exec -it deploy/substrate-api -- python -m substrate platform init --tenant lab
+
+Label the namespace so that the restricted Pod Security Standard is enforced (every pod here meets it):
+
+  kubectl label namespace {{ .Release.Namespace }} pod-security.kubernetes.io/enforce=restricted pod-security.kubernetes.io/warn=restricted
+
+The API speaks plain HTTP: put an ingress that terminates TLS in front of the "substrate-api" Service. The artifact volume needs a ReadWriteMany storage class
+(artifacts.storageClassName). One release per namespace: the object names are fixed because the network policies select the pods by them.
+`helm uninstall` keeps the artifact volume claim "substrate-artifacts" and PostgreSQL's claim (data-postgres-0); delete them yourself to remove the data.

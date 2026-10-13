@@ -1,0 +1,54 @@
+# Workers run the steps. Each step runs in its own process with a deadline, a scrubbed environment and (on Linux) address-space, CPU and file-size limits; the pod is the
+# outer boundary: no token, no capabilities, a read-only root, and a network policy that lets it reach the database and nothing else.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: substrate-worker
+  labels:
+    app.kubernetes.io/name: substrate-worker
+    {{- include "substrate.partOf" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: substrate-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: substrate-worker
+        {{- include "substrate.partOf" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        {{- include "substrate.podSecurityContext" (dict "user" 10001) | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "substrate.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["platform", "worker", "--queues", {{ .Values.worker.queues | quote }}, "--isolation", {{ .Values.worker.isolation | quote }}]
+          env:
+            - {name: SUBSTRATE_DB_FILE, value: /run/secrets/db_url}
+            - {name: SUBSTRATE_STORE, value: /data/artifacts}
+          securityContext:
+            {{- include "substrate.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - {name: artifacts, mountPath: /data/artifacts}
+            - {name: tmp, mountPath: /tmp}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim: {claimName: substrate-artifacts}
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - name: secrets
+          secret:
+            secretName: {{ .Values.secrets.existingSecret }}
+            defaultMode: 0440
+            items:
+              - {key: db_url, path: db_url}

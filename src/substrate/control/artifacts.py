@@ -180,10 +180,24 @@ class LocalArtifactStore:
         return self._path(tenant_id, sha256).is_file()
 
 
-class S3ArtifactStore:
-    """The same contract on an S3-compatible service (MinIO, AWS). Takes any client with `put_object`, `get_object` and `head_object`, such as boto3's.
+def _is_missing(error: Exception) -> bool:
+    """Whether an S3 client error means "there is no such object", as opposed to "the store did not answer the question". boto3 reports an absent key as NoSuchKey on a
+    read and as a bare ClientError with code 404 on a HEAD. A 403 (wrong credentials, no permission), a 5xx or a connection failure says nothing about the object, and
+    treating it as "absent" would show a misconfigured deployment as lost data (and the API as a 404), so those are raised."""
+    if type(error).__name__ in ("NoSuchKey", "KeyError"):
+        return True
+    response = getattr(error, "response", None)
+    if isinstance(response, dict):
+        code = str(response.get("Error", {}).get("Code", ""))
+        return code in ("NoSuchKey", "404", "NotFound") or (response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404 and code != "NoSuchBucket")
+    return False
 
-    Objects are keyed by tenant and checksum and are never overwritten with different bytes; a read is checked against the checksum in its key.
+
+class S3ArtifactStore:
+    """The same contract on an S3-compatible service (SeaweedFS, AWS, Ceph...). Takes any client with `put_object`, `get_object` and `head_object`, such as boto3's.
+
+    Objects are keyed by tenant and checksum and are never overwritten with different bytes; a read is checked against the checksum in its key. Only "no such object" is
+    reported as a missing artifact; any other failure of the store is raised as it came.
     """
 
     def __init__(self, client, bucket: str, prefix: str = "artifacts"):
@@ -209,7 +223,7 @@ class S3ArtifactStore:
         try:
             body = self.client.get_object(Bucket=self.bucket, Key=self._key(tenant_id, sha256))["Body"].read()
         except Exception as error:                                # noqa: BLE001 (boto3 raises its own ClientError)
-            if type(error).__name__ in ("NoSuchKey", "ClientError", "KeyError"):
+            if _is_missing(error):
                 raise ArtifactError(f"no artifact {sha256}") from None
             raise
         if sha256_bytes(body) != sha256:
@@ -221,7 +235,7 @@ class S3ArtifactStore:
             self.client.head_object(Bucket=self.bucket, Key=self._key(tenant_id, sha256))
             return True
         except Exception as error:                                # noqa: BLE001
-            if type(error).__name__ in ("NoSuchKey", "ClientError", "KeyError"):
+            if _is_missing(error):
                 return False
             raise
 

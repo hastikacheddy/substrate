@@ -1,13 +1,18 @@
 # Kubernetes
 
 A kustomization for the API, two workers, a single PostgreSQL, default-deny network policies and the restricted Pod Security Standard.
-Not tested against a cluster: `tests/test_deploy.py` checks the manifests' structure and the security properties below, nothing has been applied to a real cluster.
+`tests/test_deploy.py` checks the manifests' structure and the security properties below. They were also applied to a one-node minikube cluster (Kubernetes 1.30, Calico), where every pod ran under the
+restricted Pod Security Standard, a run was submitted and reproduced, and the network policies were checked from inside the pods and from other namespaces; see [docs/platform.md](../../docs/platform.md) for that and for what was not run (a
+managed cluster, more than one node, another network plugin, a real ReadWriteMany storage class, TLS). The Helm chart in `deploy/helm/substrate` renders the same workloads.
 
 ```bash
 kubectl apply -k deploy/k8s --dry-run=client          # needs only kubectl, no cluster
 kubectl create namespace substrate
+# The database URL here names the Service "postgres" (docker-compose.yml's file names "db", which does not exist in a cluster). Make it from the password, in a file that is removed afterwards:
+printf 'postgresql+psycopg2://substrate:%s@postgres:5432/substrate' "$(cat deploy/secrets/db_password)" > /tmp/k8s_db_url
 kubectl -n substrate create secret generic substrate-secrets \
-  --from-file=db_password=deploy/secrets/db_password --from-file=db_url=deploy/secrets/db_url     # see deploy/secrets/README.md for how to make them
+  --from-file=db_password=deploy/secrets/db_password --from-file=db_url=/tmp/k8s_db_url        # see deploy/secrets/README.md for how to make db_password
+rm /tmp/k8s_db_url
 kubectl apply -k deploy/k8s
 kubectl -n substrate exec -it deploy/substrate-api -- python -m substrate platform init --tenant lab      # prints the first administrator's key once
 ```
