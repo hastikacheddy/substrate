@@ -1,14 +1,20 @@
 """The GUI's HTTP layer: a small JSON API over `App` and the static page. Standard library only.
 
-It binds to the loopback address only, and refuses requests whose Host or Origin is not this server (so a web page open in another tab
-cannot drive it, nor can a DNS-rebinding trick), requires JSON for every POST, and serves only the files in `static/` by exact name.
+By default it binds to the loopback address only, and refuses requests whose Host or Origin is not this server (so a web page open in another
+tab cannot drive it, nor can a DNS-rebinding trick), requires JSON for every POST, and serves only the files in `static/` by exact name.
 It runs the experiments the project's own `experiments/` folder lists and nothing else: a path is resolved and refused unless it stays
 inside that folder.
+
+It can also be run as a public demo (a Hugging Face Space, say), and only on request: `bind` other than loopback is refused unless at least one
+`allowed_hosts` name is given, the Host and Origin checks then accept exactly those names as well as the loopback ones (nothing else, and no
+wildcard), and the number of jobs running at once is capped (default 2) so that a visitor cannot use up the machine.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import mimetypes
+import re
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +27,9 @@ from .app import App, GuiError
 
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_BODY = 1_000_000
+LOOPBACK_BINDS = ("127.0.0.1", "::1")
+PUBLIC_DEFAULT_MAX_JOBS = 2                              # jobs running at once when the server listens beyond this machine and no other number is given
+HOST_NAME = re.compile(r"[a-z0-9]([a-z0-9.\-]{0,251}[a-z0-9])?(:[0-9]{1,5})?")
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; base-uri 'none'; form-action 'none'"
 
 
@@ -55,14 +64,16 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": message}, status, extra)
 
     def _allowed(self) -> bool:
-        """The request must be addressed to this server, from this server's own page (or from a non-browser client)."""
+        """The request must be addressed to this server, from this server's own page (or from a non-browser client). `allowed_hosts` are the extra names
+        a public deployment answers to (the ones it was started with, exactly; a page served from one of them may be over http or https)."""
         port = self.server.server_address[1]
-        hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
-        if self.headers.get("Host", "") not in hosts:
+        local = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        extra = self.server.allowed_hosts
+        if self.headers.get("Host", "").lower() not in local | extra:
             self._error(403, "unexpected Host header")
             return False
         origin = self.headers.get("Origin")
-        if origin is not None and origin not in {f"http://{h}" for h in hosts}:
+        if origin is not None and origin.lower() not in {f"http://{h}" for h in local | extra} | {f"https://{h}" for h in extra}:
             self._error(403, "cross-origin requests are refused")
             return False
         return True
@@ -167,25 +178,51 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False
 
-    def __init__(self, address, app: App):
+    def __init__(self, address, app: App, allowed_hosts: frozenset[str] = frozenset()):
         super().__init__(address, Handler)
         self.app = app
+        self.allowed_hosts = allowed_hosts
 
 
-def make_server(app: App | None = None, port: int = 8765) -> Server:
-    """A server bound to 127.0.0.1 (port 0 picks a free one)."""
-    return Server(("127.0.0.1", port), app or App())
-
-
-def serve(port: int = 8765, root=None, open_browser: bool = True) -> int:
-    app = App(root)
+def check_exposure(bind: str, allowed_hosts) -> frozenset[str]:
+    """The extra Host names to accept, or ValueError. `bind` must be an IP address; anything but loopback needs at least one name, and a name is a plain host name
+    (letters, digits, dots and hyphens, an optional port): no scheme, path, wildcard or space."""
     try:
-        server = make_server(app, port)
-    except OSError as error:
-        print(f"error: cannot listen on 127.0.0.1:{port} ({error}); try --port", flush=True)
+        address = ipaddress.ip_address(bind)
+    except ValueError:
+        raise ValueError(f"--bind takes an IP address (got '{bind}')") from None
+    names = frozenset(str(h).strip().lower() for h in allowed_hosts)
+    for name in names:
+        if not HOST_NAME.fullmatch(name):
+            raise ValueError(f"'{name}' is not a host name (use a plain name such as demo.example.org, with an optional :port)")
+    if not address.is_loopback and not names:
+        raise ValueError(f"listening on {bind} reaches beyond this machine: say which host names the server answers to with --allow-host")
+    return names
+
+
+def make_server(app: App | None = None, port: int = 8765, bind: str = "127.0.0.1", allowed_hosts=()) -> Server:
+    """A server bound to `bind` (127.0.0.1 unless asked; port 0 picks a free one). See the module docstring for what a non-loopback `bind` needs."""
+    names = check_exposure(bind, allowed_hosts)
+    return Server((bind, port), app or App(), names)
+
+
+def serve(port: int = 8765, root=None, open_browser: bool = True, bind: str = "127.0.0.1", allowed_hosts=(), max_jobs: int | None = None) -> int:
+    try:
+        names = check_exposure(bind, allowed_hosts)
+    except ValueError as error:
+        print(f"error: {error}", flush=True)
         return 1
-    url = f"http://127.0.0.1:{server.server_address[1]}/"
-    print(f"substrate GUI on {url}  (project: {app.root})  Ctrl+C to stop", flush=True)
+    if max_jobs is None and not ipaddress.ip_address(bind).is_loopback:
+        max_jobs = PUBLIC_DEFAULT_MAX_JOBS
+    app = App(root, max_jobs=max_jobs)
+    try:
+        server = Server((bind, port), app, names)
+    except OSError as error:
+        print(f"error: cannot listen on {bind}:{port} ({error}); try --port", flush=True)
+        return 1
+    url = f"http://{'127.0.0.1' if bind in ('0.0.0.0', '::') else bind}:{server.server_address[1]}/"
+    print(f"substrate GUI on {url}  (project: {app.root})"
+          + (f"  answering to {', '.join(sorted(names))}; at most {max_jobs} jobs at once" if names else "") + "  Ctrl+C to stop", flush=True)
     if open_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:

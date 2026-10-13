@@ -61,7 +61,8 @@ and makes you name the route.
 - **`gui/`: the local web GUI.** `app.py` is everything the GUI does without HTTP (list and run experiments, apply input edits, run long work as
   background jobs the page polls, assemble the transfer study and save it); `serialize.py` turns solved systems into JSON and decides which arrays
   are worth plotting at each scale (the server chooses what to show; the page only draws three generic plot types); `server.py` is a standard-library
-  HTTP layer; `static/` is plain HTML, CSS and JavaScript with no build step and no external requests. The server binds to loopback, refuses a Host
+  HTTP layer; `static/` is plain HTML, CSS and JavaScript with no build step and no external requests. The server binds to loopback (and listens beyond it only as an
+  opt-in public demo that must name the hosts it answers to, with a cap on concurrent jobs), refuses a Host
   or Origin that is not itself (so another page in the browser, or a DNS-rebinding trick, cannot drive it), requires JSON for every POST, serves only
   the files in `static/` by exact name under a strict Content-Security-Policy, and resolves experiment paths so they cannot leave `experiments/`.
 - **`molecules.py`: molecule templates.** An experiment may name a molecule (`molecule: {template: ammonium_dimer_cation}`) instead of listing

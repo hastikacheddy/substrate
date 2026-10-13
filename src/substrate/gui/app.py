@@ -68,13 +68,19 @@ class Job:
 
 
 class JobManager:
-    def __init__(self):
+    def __init__(self, max_running: int | None = None):
+        """`max_running` caps the jobs queued or running at once (a public deployment sets it); None, the default, is no cap."""
         self.jobs: dict[str, Job] = {}
+        self.max_running = max_running
         self._lock = threading.Lock()
 
     def submit(self, label: str, fn, *, wait: bool = False) -> Job:
         job = Job(label)
         with self._lock:
+            if self.max_running is not None:
+                busy = sum(1 for j in self.jobs.values() if j.status in ("queued", "running"))
+                if busy >= self.max_running:
+                    raise GuiError(f"the server is busy: {busy} job(s) are running (at most {self.max_running} at once); try again in a minute", 429)
             self.jobs[job.id] = job
             for old in list(self.jobs)[:-MAX_JOBS]:
                 self.jobs.pop(old, None)
@@ -115,14 +121,14 @@ def default_root() -> Path:
 
 
 class App:
-    def __init__(self, root: str | Path | None = None, cache_dir: str | Path | None = None):
+    def __init__(self, root: str | Path | None = None, cache_dir: str | Path | None = None, max_jobs: int | None = None):
         self.root = Path(root).resolve() if root else default_root()
         self.experiments_dir = self.root / "experiments"
         base = Path(cache_dir) if cache_dir else Path(os.environ.get("SUBSTRATE_CACHE_DIR") or Path.home() / ".cache" / "substrate")
         self.cache_dir = base / "gui"
         self.registry = default_registry()
         self.pipeline = Pipeline(self.registry)
-        self.jobs = JobManager()
+        self.jobs = JobManager(max_jobs)
         self._pyscf: bool | None = None
         self._references: dict[str, Reference] = {}
         self._reference_lock = threading.Lock()

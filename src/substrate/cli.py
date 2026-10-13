@@ -95,14 +95,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="where every fit defines its coupling, so the parameters share variables (default: the mean of the references' mid-range distances)")
     tr.add_argument("--json", help="save the cross-prediction numbers here")
     gui = sub.add_parser("gui", help="start the local web GUI (mission control: run, edit, watch the scales, explore the transfer study)")
-    gui.add_argument("--port", type=int, default=8765, help="port on 127.0.0.1 (default 8765)")
+    gui.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     gui.add_argument("--no-browser", action="store_true", help="do not open a browser window")
     gui.add_argument("--root", help="the project folder that holds experiments/ (default: this checkout)")
+    gui.add_argument("--bind", default="127.0.0.1", help="IP address to listen on (default 127.0.0.1: this machine only). Anything else makes it a public demo and needs --allow-host")
+    gui.add_argument("--allow-host", action="append", default=[], metavar="HOST",
+                     help="a host name the server answers to besides localhost, for a public demo (repeatable; no wildcards); the Origin of a page served from it is accepted too")
+    gui.add_argument("--max-jobs", type=int, help="most jobs running at once (default: no limit on this machine, 2 on a public demo)")
     args = parser.parse_args(argv)
 
     if args.command == "gui":
         from .gui import serve
-        return serve(args.port, args.root, open_browser=not args.no_browser)
+        return serve(args.port, args.root, open_browser=not args.no_browser, bind=args.bind, allowed_hosts=args.allow_host, max_jobs=args.max_jobs)
     if args.command == "calibrate":
         return _calibrate(args)
     if args.command == "transfer":

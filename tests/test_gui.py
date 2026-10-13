@@ -399,3 +399,100 @@ def test_a_reference_that_declares_separate_bonds_is_fitted_and_shown_with_its_a
     assert curve["scratch"][-1]["rmse"] < 1e-3 and set(curve["priors"]) == {"0.3"}                      # the learning curve fits the target's own bond model
     assert curve["floor"] < 1e-3                                                                        # (a shared-bond fit of this surface misses by 0.17 eV)
     json.dumps(payload, allow_nan=False)
+
+
+# -- running it as a public demo (a Hugging Face Space): only on request, and still strict ---------------------------------------------------------------
+from substrate.gui.server import check_exposure  # noqa: E402
+
+
+@pytest.mark.parametrize("bind, hosts", [("127.0.0.1", ()), ("127.0.0.1", ("demo.example.org",)), ("0.0.0.0", ("demo.example.org",)), ("::1", ()),
+                                         ("0.0.0.0", ("a.example.org", "b.example.org:8443", "DEMO.Example.Org"))])
+def test_a_server_may_listen_beyond_this_machine_only_when_it_names_its_hosts(bind, hosts):
+    names = check_exposure(bind, hosts)
+    assert names == frozenset(h.lower() for h in hosts)                                           # names are compared lower-case
+
+
+@pytest.mark.parametrize("bind, hosts, message", [
+    ("0.0.0.0", (), "--allow-host"), ("192.168.1.20", (), "--allow-host"), ("::", (), "--allow-host"),                      # reaches beyond this machine, answers to nothing
+    ("demo.example.org", ("demo.example.org",), "IP address"), ("localhost", (), "IP address"), ("", (), "IP address"),     # a name is not an address
+    ("127.0.0.1", ("*",), "not a host name"), ("127.0.0.1", ("*.example.org",), "not a host name"),                          # no wildcards
+    ("127.0.0.1", ("https://demo.example.org",), "not a host name"), ("127.0.0.1", ("demo.example.org/x",), "not a host name"),
+    ("127.0.0.1", ("demo example",), "not a host name"), ("127.0.0.1", ("",), "not a host name"), ("127.0.0.1", ("-x.org",), "not a host name"),
+    ("127.0.0.1", ("a" * 300 + ".org",), "not a host name"), ("127.0.0.1", ("x.org:99999999",), "not a host name"),
+])
+def test_what_a_public_server_may_not_be_asked_for(bind, hosts, message):
+    with pytest.raises(ValueError, match=message):
+        check_exposure(bind, hosts)
+
+
+def test_the_server_refuses_to_start_beyond_this_machine_without_names_and_says_so(capsys):
+    assert serve(0, open_browser=False, bind="0.0.0.0") == 1
+    assert "--allow-host" in capsys.readouterr().out
+    with pytest.raises(ValueError, match="--allow-host"):
+        make_server(App(ROOT), 0, bind="0.0.0.0")
+
+
+def test_the_command_line_has_the_same_rule():
+    from substrate.cli import main
+    assert main(["gui", "--bind", "0.0.0.0", "--no-browser", "--port", "0"]) == 1                   # refused before anything is bound
+
+
+@pytest.fixture(scope="module")
+def public(tmp_path_factory):
+    app = App(ROOT, cache_dir=tmp_path_factory.mktemp("public-cache"), max_jobs=1)
+    srv = make_server(app, 0, allowed_hosts=("demo.example.org",))
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    yield srv
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_a_public_server_answers_to_its_named_host_and_origin_and_to_nothing_else(public):
+    port = public.server_address[1]
+    assert call(public, "/api/status", headers={"Host": "demo.example.org"})[0] == 200
+    assert call(public, "/api/status", headers={"Host": "Demo.Example.Org", "Origin": "https://demo.example.org"})[0] == 200       # its own page, over TLS
+    assert call(public, "/api/status", headers={"Host": "demo.example.org", "Origin": "http://demo.example.org"})[0] == 200
+    assert call(public, "/api/status", headers={"Host": f"127.0.0.1:{port}"})[0] == 200                                           # and still to the local names
+    assert call(public, "/api/status", headers={"Host": "demo.example.org", "Origin": "https://evil.example"})[0] == 403           # another page
+    assert call(public, "/api/status", headers={"Host": "demo.example.org", "Origin": "https://demo.example.org.evil.example"})[0] == 403
+    assert call(public, "/api/status", headers={"Host": "evil.example"})[0] == 403                                                 # DNS rebinding
+    assert call(public, "/api/status", headers={"Host": "demo.example.org.evil.example"})[0] == 403
+    assert call(public, "/api/status", headers={"Host": "demo.example.org:81"})[0] == 403                                          # the port is part of the name
+    assert call(public, "/api/run", body={"path": "proton_transfer.yaml"}, headers={"Host": "demo.example.org", "Origin": "https://evil.example"})[0] == 403
+
+
+def test_a_local_server_does_not_learn_the_public_names(server):
+    assert call(server, "/api/status", headers={"Host": "demo.example.org"})[0] == 403               # the default server is exactly as strict as it was
+    assert call(server, "/api/status", headers={"Origin": "https://demo.example.org"})[0] == 403
+
+
+def test_jobs_at_once_are_capped_when_asked_and_not_otherwise():
+    release = threading.Event()
+    capped = JobManager(max_running=2)
+    first, second = (capped.submit(f"held {i}", lambda log: release.wait(30)) for i in range(2))
+    with pytest.raises(GuiError) as error:
+        capped.submit("third", lambda log: 1)
+    assert error.value.status == 429 and "busy" in str(error.value) and "2" in str(error.value)
+    release.set()
+    for job in (first, second):
+        deadline = time.time() + 10
+        while job.status not in ("done", "error"):
+            assert time.time() < deadline
+            time.sleep(0.01)
+    assert capped.submit("after", lambda log: 7, wait=True).to_dict()["result"] == 7                 # a finished job frees its place
+    unlimited = JobManager()
+    held = [unlimited.submit(f"h{i}", lambda log: release.wait(0.05)) for i in range(8)]               # the default has no cap, as before
+    assert len(held) == 8
+
+
+def test_the_cap_reaches_the_api_as_a_429_and_a_finished_job_frees_the_place(public):
+    release = threading.Event()
+    blocker = public.app.start_job("held", lambda log: release.wait(30))
+    status, body = get(public, "/api/run", body={"path": "proton_transfer.yaml"}, headers={"Host": "demo.example.org"})
+    assert status == 429 and "busy" in body["error"]
+    release.set()
+    finish(public, blocker)
+    status, job = get(public, "/api/run", body={"path": "proton_transfer.yaml"}, headers={"Host": "demo.example.org"})
+    assert status == 200 and job["label"]
+    assert finish(public, job)["status"] == "done"

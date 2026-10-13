@@ -670,6 +670,10 @@ flowchart LR
 The API the page uses: `GET /api/status`, `/api/experiments`, `/api/experiment`, `/api/job`, `/api/references`, `/api/transfer` and `POST /api/run`, `/api/transfer/run`,
 `/api/transfer/rates`, `/api/transfer/learning`. Experiment paths are resolved so they cannot leave `experiments/`.
 
+It listens on 127.0.0.1 and nowhere else unless asked. **A public demo** is an opt-in mode: `--bind 0.0.0.0` is refused unless at least one `--allow-host NAME` says which host name the server answers
+to (no wildcards); the Host and Origin checks then accept exactly those names as well as the local ones, and `--max-jobs` (2 by default in this mode) caps the jobs running at once, so a visitor gets
+HTTP 429, "the server is busy", and not the whole machine. [deploy/huggingface/](deploy/huggingface/README.md) builds a Hugging Face Space that way.
+
 ## What it found
 
 The details, with every number and the predictions that failed, are in [docs/findings.md](docs/findings.md).
@@ -731,7 +735,8 @@ src/substrate/
   control/                                      the control plane: API, registry, roles and quotas, queue, workers, sandbox, artifacts, data fabric, a Redis wake-up, metrics (the `platform` extra)
   molecules.py                                  templates: Zundel, ammonium dimer, bifluoride, water–ammonia, methanol–water, ...
   gui/                                          the local web GUI: standard-library server, plain HTML/JS, no build step, no external requests
-deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, a Helm chart, Prometheus, Grafana, Tempo and OpenTelemetry configuration, verify_networks.py
+deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, a Helm chart, Prometheus, Grafana, Tempo and OpenTelemetry configuration, verify_networks.py;
+                                                huggingface/ builds and uploads a Hugging Face Space that runs the GUI as a public demo
 experiments/                                    runnable experiment files; references/ (24 real surfaces) and benchmarks/ (8 bifluoride surfaces)
 examples/                                       the scripts in the table above
 tests/                                          1,956 tests
