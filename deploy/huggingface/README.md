@@ -27,6 +27,9 @@ end inside the request that started it, because a worker has no threads (`App(in
   (237 of 237 numbers); a three-surface study, median relative difference 8e-8 and 90% under 1e-5, but 10 of 3,393 numbers off by more than 1e-3 and a few near-threshold outcomes flipped (a second well or a barrier found
   or not, on the bifluoride surface). The card says so.
 - It needs a browser with WebAssembly and web workers, downloads about 40 MB on the first visit, and fetches Pyodide from a CDN, so it does not run offline.
+- **On a private Space the page's requests are authorised and a worker's are not.** The Space's page is loaded with a signed `?__sign=` address; the page and the scripts it loads work, but a `fetch` made
+  from inside the worker was answered 401 (seen on Hugging Face on 2026-10-14, after everything passed locally). So the page downloads `bundle.zip` and hands the bytes to the worker.
+  The page shows "not computed yet" for the transfer study until Python has started, because the worker answers one request at a time and Python takes about half a minute to load.
 
 ## A Docker Space: the local GUI as a server
 
