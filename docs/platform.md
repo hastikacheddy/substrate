@@ -202,7 +202,7 @@ vulnerability audit of every lock file, and CodeQL; the Linux-only resource limi
 
 **Run against real systems on 12 October 2026**, on one Windows 11 machine (Docker Desktop, Docker Engine 25.0.3, Compose 2.24.6; minikube 1.33.1 with Kubernetes 1.30 and Calico), with what each run found:
 
-- **The container stack.** The image builds from the locked wheels, and the whole Compose stack (PostgreSQL 16, Redis 7.4, the API, two workers, the OpenTelemetry collector, Tempo, Prometheus, Grafana)
+- **The container stack.** The image builds from the locked wheels, and the whole Compose stack (PostgreSQL 16, and 18 after the upgrade below, Redis 7.4, the API, two workers, the OpenTelemetry collector, Tempo, Prometheus, Grafana)
   starts under its restrictions: read-only roots, no capabilities, non-root users. A run submitted through the API succeeded on the workers; its artifacts were stored and read back, its lineage and the
   audit chain verified, and its reproduction passed (largest relative difference 0). The seven task spans of the run arrived in Tempo as one trace, found by the id computed from the run id (Tempo labels the
   trace "root span not yet received", because the root is a synthetic parent that is never exported, by design). Prometheus scraped the API with an OPERATOR key and loaded the six alert rules; Grafana
@@ -214,7 +214,8 @@ vulnerability audit of every lock file, and CodeQL; the Linux-only resource limi
   the file's and names the ones that are wrong; `docker compose up -d --force-recreate <service>` usually fixes it. I first blamed the order of the networks listed, and said so in an earlier commit
   message and a test; that was wrong (three good runs were luck) and the test is gone.
 - **PostgreSQL.** The control-plane tests ran against a real PostgreSQL 16 (`SUBSTRATE_TEST_PG_URL`: every SQLite registry a test builds gets a private schema there): 1,063 passed, after two tests that read
-  SQLite's file were made database-agnostic. The CLI tests that start a subprocess still use SQLite. The platform also ran on PostgreSQL in the containers and in the cluster.
+  SQLite's file were made database-agnostic. Against PostgreSQL 18.6, started with the compose file's hardening, 1,161 passed and 21 were skipped; the one failure was a test of mine that expected SQLite's name
+  for the error of a missing table (PostgreSQL's is `ProgrammingError`), now fixed. The CLI tests that start a subprocess still use SQLite. The platform also ran on PostgreSQL in the containers and in the cluster.
 - **S3.** The artifact store ran against a real S3-compatible server, SeaweedFS 4.47 (MinIO no longer publishes images): 8 tests, covering a round trip, tenant isolation, a tampered object, 5 MB of binary,
   wrong credentials, an unreachable server, the CLI's `s3://` location, and a whole run with its reproduction. It found that every `ClientError` was read as "no such object", so a 403 from wrong credentials
   was a missing artifact (a 404 from the API); only a real 404 is "missing" now. **AWS S3 itself was not run.**
@@ -236,13 +237,18 @@ vulnerability audit of every lock file, and CodeQL; the Linux-only resource limi
   different seeds are not. An experiment's `shots` and `seed` were silently dropped by the experiment parser until a seeded run failed to reproduce; they are kept now, and parsing no longer builds the
   emulator (a run on an emulated device took 82 s before that; a seeded Aer run takes 2 to 5 s now, and the emulated-device run was not timed again).
 
-**Image upgrades Dependabot proposed, tried in a scratch copy of the Compose file on 12 October 2026 (none applied):** `otel/opentelemetry-collector-contrib` 0.162.0 and `prom/prometheus` v3.15.0 work with the
-current configuration (runs succeed and reproduce, all seven spans of a run arrive through the new collector, Prometheus scrapes the API and loads the six alert rules; the collector warns that the `otlphttp` name
-is deprecated in favour of `otlp_http`). The others do not work as the files stand: `grafana/tempo` 3.1.0 rejects `tempo.yaml` (`field compactor not found`); `grafana/grafana` 13.2.3 cannot register its built-in
-Prometheus data source under the read-only root filesystem (its plugin installer fails with "read-only file system"); `postgres` 18 refuses the mount at `/var/lib/postgresql/data` (its images keep a
-version-specific directory under `/var/lib/postgresql`, and a version 16 volume cannot be opened by it without a dump and restore); and `python` 3.14 cannot build the image, because the locked scientific
-wheels have none for it. The numpy, scipy and pyyaml bumps change the locked runtime: numpy 2.2.6 passed the whole suite in an earlier local run, but they were not run through the studies, so they are a
-decision for whoever owns the numbers.
+**The upgrades Dependabot proposed, merged on 13 October 2026 except the Python one, each tried on the stack before it was merged.** `otel/opentelemetry-collector-contrib` 0.162.0 and `prom/prometheus` v3.15.0
+needed no change (the collector warns that the `otlphttp` name is deprecated in favour of `otlp_http`). `grafana/tempo` 3.1.0 rejected `tempo.yaml` (`field compactor not found`): Tempo 3 removed the compactor, so the
+file now sets `block_retention` under `backend_scheduler` and `backend_worker`, and the effective configuration read back from a running Tempo shows 168 hours. `grafana/grafana` 13.2.3 could not register its Prometheus
+data source on the read-only root filesystem, because its background plugin installer fails there; `GF_PLUGINS_PREINSTALL_DISABLED=true` fixes it. `postgres` 18 refuses a mount at `/var/lib/postgresql/data` (its image
+keeps the data in a version-specific directory below `/var/lib/postgresql`), so the volume is mounted there now. **A volume made by PostgreSQL 16 cannot be opened by 18 (dump and restore, or start from a new volume), and the
+Kubernetes manifests and the Helm chart still use PostgreSQL 16, unchanged and tested that way.** With all of them together on one stack (PostgreSQL 18.6, Grafana 13.2.3, Tempo 3.1.0, collector 0.162.0, Prometheus
+v3.15.0): three workflows ran and each reproduced, the Prometheus data source and target worked, 11 of the dashboard's 14 queries returned data, and a run's seven spans came back from Tempo through Grafana.
+`python` 3.14 was **not** merged: pip finds no 3.14 wheel for the locked numpy 2.2.6, downloads its source and tries to compile it, and the slim image has no compiler, so the image does not build (the same lock
+builds on 3.13, which no pull request proposes). numpy, scipy and pyyaml were merged as changes to the lock only, to numpy 2.2.6, scipy 1.15.3 and PyYAML 6.0.3: the pull requests also raised the minimum versions
+in `pyproject.toml`, which would exclude every user of numpy 1.x and which no test ever exercised (the tests run on the locked pins), so those minimums are as they were. The whole suite passed on Python 3.10, 3.11 and 3.12
+on the new pins (1,798, 1,862 and 1,799 passed, the 3.11 run including the Qiskit tests) and pip-audit finds nothing in any lock file. **The studies and benchmarks reported in these documents were produced on
+numpy 1.26.4, scipy 1.14.0 and PyYAML 6.0.1 and were not re-run on the new pins.**
 
 Not verified, and not claimed:
 

@@ -252,7 +252,8 @@ def test_check_fails_on_an_empty_database_without_creating_its_tables(tmp_path, 
     monkeypatch.setenv("SUBSTRATE_DB", f"sqlite:///{path}")
     monkeypatch.setenv("SUBSTRATE_STORE", str(tmp_path))
     assert main(["platform", "check"]) == 1
-    assert "not ready: OperationalError" in capsys.readouterr().err
+    import re
+    assert re.search(r"not ready: (OperationalError|ProgrammingError)", capsys.readouterr().err)               # SQLite says OperationalError for a missing table, PostgreSQL ProgrammingError
     with sa.create_engine(f"sqlite:///{path}").connect() as conn:
         assert sa.inspect(conn).get_table_names() == []                                    # looking did not create the schema
 
