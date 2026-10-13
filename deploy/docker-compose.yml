@@ -57,7 +57,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     secrets: [db_password]
     volumes:
-      - dbdata:/var/lib/postgresql/data
+      - dbdata:/var/lib/postgresql        # PostgreSQL 18's image keeps the data in a version-specific directory below this one (18/docker), and refuses a mount at .../data. A volume made by 16 cannot be opened by 18: dump and restore, or start from a new volume
     tmpfs: ["/tmp:size=64m", "/run/postgresql:size=8m"]
     networks: [backend]
     healthcheck:
