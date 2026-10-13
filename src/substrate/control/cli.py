@@ -104,10 +104,36 @@ def artifact_store(location: str | None):
     return LocalArtifactStore(location)
 
 
-def _open(args):
+DB_WAIT_S = 60.0                     # how long `serve` and `worker` wait for the database to come up (override: $SUBSTRATE_DB_WAIT_S)
+
+
+def _db_wait_seconds() -> float:
+    try:
+        return max(0.0, float(os.environ.get("SUBSTRATE_DB_WAIT_S", DB_WAIT_S)))
+    except ValueError:
+        raise SubstrateError("SUBSTRATE_DB_WAIT_S must be a number of seconds") from None
+
+
+def _open(args, wait_s: float = 0.0, sleep=time.sleep):
+    """The registry and the artifact store. When the database cannot be reached it is tried again every two seconds for `wait_s` (a pod that starts beside its database is
+    up before the database is), and then refused with a message that names the type of the error and never the URL, which holds the password."""
+    import sqlalchemy as sa
     from .artifacts import Artifacts
     from .registry import Registry
-    registry = Registry(database_url(args.db))
+    url = database_url(args.db)
+    deadline, announced = time.monotonic() + wait_s, False
+    while True:
+        try:
+            registry = Registry(url)
+            break
+        except sa.exc.OperationalError as error:
+            if time.monotonic() >= deadline:
+                raise SubstrateError(f"cannot reach the database ({type(error.orig).__name__ if getattr(error, 'orig', None) is not None else type(error).__name__})"
+                                     + (f" after waiting {wait_s:.0f} s" if wait_s else "")) from None
+            if not announced:
+                print("waiting for the database ...", file=sys.stderr, flush=True)
+                announced = True
+            sleep(2.0)
     return registry, Artifacts(registry, artifact_store(args.store))
 
 
@@ -129,9 +155,12 @@ def _notifier():
 
 
 def _orchestrator(registry, artifacts, isolation: str | None = None, observer=None):
+    from ..qpu import policy_from_environment
+    from .gateway import QPUGateway
     from .orchestrator import Orchestrator
     from .sandbox import ProcessExecutor, default_isolation
-    orchestrator = Orchestrator(registry, artifacts, observer=observer, notifier=_notifier())
+    gateway = QPUGateway(registry, policy_from_environment())          # which quantum providers a run may name: $SUBSTRATE_QPU_PROVIDERS (default: the simulator only)
+    orchestrator = Orchestrator(registry, artifacts, observer=observer, notifier=_notifier(), gateway=gateway)
     if (isolation or default_isolation()) == "process":
         orchestrator.executor = ProcessExecutor(quantum_policy=orchestrator.gateway.policy)
     return orchestrator
@@ -191,7 +220,7 @@ def run(args) -> int:
         return _check(args)
     try:
         try:
-            registry, artifacts = _open(args)
+            registry, artifacts = _open(args, _db_wait_seconds() if args.platform_command in ("serve", "worker") else 0.0)
         except ImportError as error:
             raise SubstrateError(f"the control plane needs its extra dependencies: pip install 'substrate[platform]' ({error.name} is missing)") from None
         command = args.platform_command

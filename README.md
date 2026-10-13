@@ -46,9 +46,10 @@ valence-bond model, fitted to one molecule at one level of theory, say anything 
   what is *not* defended, is in [SECURITY.md](SECURITY.md).
 - **Mission control.** A local web GUI over the same engines: edit any input and the whole chain re-runs, or explore the transfer study as a clickable matrix.
 - **A control plane for more than one person.** An API, a tenant-scoped registry with roles and quotas, a task queue and workers (each step in its own process), content-addressed artifacts,
-  a six-axis run status instead of "failed", `reproduce` that re-runs and compares, an allow-listed data fabric (PubChem, RCSB, the bundled NIST set), a quantum-solver seam with a policy gateway,
-  metrics, traces and a Grafana dashboard, and Docker Compose and Kubernetes files. What was run and what was only checked structurally is stated in [docs/platform.md](docs/platform.md).
-- **Tested hard.** 1,764 tests, closed-form and independent checks, and mutation testing of the numerical code and of the control plane (586 of 612 mutants caught; the other 26 are accounted for). Bugs found in my own work are listed, not hidden.
+  a six-axis run status instead of "failed", `reproduce` that re-runs and compares, an allow-listed data fabric (PubChem, RCSB, NASA JPL's spectral-line catalog, the bundled NIST set), quantum solvers behind a policy gateway (a simulator, and Qiskit
+  emulators of IBM devices; no real quantum device has been run), an optional Redis wake-up for workers, metrics, traces and a Grafana dashboard, and Docker Compose, Kubernetes manifests
+  and a Helm chart. What was run for real and what was not is stated in [docs/platform.md](docs/platform.md).
+- **Tested hard.** 1,956 tests, closed-form and independent checks, and mutation testing of the numerical code and of the control plane (586 of 612 mutants caught when that was run, the other 26 accounted for; the Redis, JPL and Qiskit code added since has not been mutation-tested). Bugs found in my own work are listed, not hidden.
 
 ## Screenshots
 
@@ -96,7 +97,7 @@ pip install -e ".[dev,platform]"                                     # the platf
 
 python -m substrate run experiments/proton_transfer_pathway.yaml     # five scales, nine stages
 python -m substrate gui                                              # mission control, http://127.0.0.1:8765/
-pytest -m "not qc"                                                   # 1,691 tests, no PySCF needed (10 to 20 min)
+pytest -m "not qc"                                                   # 1,883 tests, no PySCF needed (about 12 min)
 ```
 
 An experiment is a YAML file. Naming only the destination scale is enough when the route is unambiguous, and a `sigma` turns an input into a Monte-Carlo draw through the whole chain:
@@ -581,7 +582,7 @@ Read [docs/limits.md](docs/limits.md); in brief:
 
 ## Validation
 
-1,764 tests: 1,691 run without PySCF (10 to 20 minutes with the platform extras installed; without them 1,252 run and 30 skip, in about 6 minutes), and 73 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
+1,956 tests: 1,883 run without PySCF (about 12 minutes with every extra installed, 21 of them skipped on Windows or without a real Redis, S3 server, PostgreSQL or network; with the scientific core only, 1,280 run and 36 are skipped, in about 6 minutes), and 73 need a real quantum-chemistry program. They use closed-form results and independent calculations instead of the code agreeing with itself:
 
 - The two-state model equals the engine's diagonalisation to 1e-10; the closed-form calibration recovers a noise-free surface exactly and reports honest uncertainty on a noisy one.
 - The PySCF bridge is checked against physics: the variational principle and the Hartree–Fock limit, invariance under rigid motion, CCSD being exact for two electrons (so the triples correction vanishes),
@@ -605,10 +606,10 @@ src/substrate/
   control/                                      the control plane: API, registry, roles and quotas, queue, workers, sandbox, artifacts, data fabric, metrics (the `platform` extra)
   molecules.py                                  templates: Zundel, ammonium dimer, bifluoride, water–ammonia, methanol–water, ...
   gui/                                          the local web GUI: standard-library server, plain HTML/JS, no build step, no external requests
-deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, Prometheus, Grafana and OpenTelemetry configuration
+deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, a Helm chart, Prometheus, Grafana and OpenTelemetry configuration
 experiments/                                    runnable experiment files; references/ (24 real surfaces) and benchmarks/ (8 bifluoride surfaces)
 examples/                                       the scripts in the table above
-tests/                                          1,764 tests
+tests/                                          1,956 tests
 docs/                                           architecture, science, findings, validation, limits, extending, images
 .github/                                        CI (tests, dependency audit, SBOM, container build), CodeQL, Dependabot; the requirements-*lock.txt files pin the versions
 SECURITY.md                                     the threat model, what is defended, what is not, how to report a vulnerability
@@ -629,9 +630,9 @@ SECURITY.md                                     the threat model, what is defend
 ## Development
 
 ```bash
-pip install -e ".[dev,platform]"   # add ".[plots]" for the benchmark figure; ".[postgres,otlp]" for those deployment options
+pip install -e ".[dev,platform]"   # add ".[plots]" for the benchmark figure; ".[postgres,otlp,redis,s3]" for those deployment options; ".[qiskit]" for the Qiskit quantum providers
 pytest                             # everything; tests marked `qc` need PySCF and skip without it
-pytest -m "not qc"                 # the 1,691 that do not
+pytest -m "not qc"                 # the 1,883 that do not
 ```
 
 ## Credits and license
