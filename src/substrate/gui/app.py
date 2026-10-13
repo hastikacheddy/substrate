@@ -68,10 +68,12 @@ class Job:
 
 
 class JobManager:
-    def __init__(self, max_running: int | None = None):
-        """`max_running` caps the jobs queued or running at once (a public deployment sets it); None, the default, is no cap."""
+    def __init__(self, max_running: int | None = None, inline: bool = False):
+        """`max_running` caps the jobs queued or running at once (a public deployment sets it); None, the default, is no cap.
+        `inline` runs each job to its end inside `submit`, on the calling thread, for a place that has no threads (the in-browser demo)."""
         self.jobs: dict[str, Job] = {}
         self.max_running = max_running
+        self.inline = inline
         self._lock = threading.Lock()
 
     def submit(self, label: str, fn, *, wait: bool = False) -> Job:
@@ -98,6 +100,9 @@ class JobManager:
             finally:
                 job.finished = time.time()
 
+        if self.inline:
+            target()
+            return job
         thread = threading.Thread(target=target, daemon=True, name=f"job-{job.id}")
         thread.start()
         if wait:
@@ -121,14 +126,14 @@ def default_root() -> Path:
 
 
 class App:
-    def __init__(self, root: str | Path | None = None, cache_dir: str | Path | None = None, max_jobs: int | None = None):
+    def __init__(self, root: str | Path | None = None, cache_dir: str | Path | None = None, max_jobs: int | None = None, inline_jobs: bool = False):
         self.root = Path(root).resolve() if root else default_root()
         self.experiments_dir = self.root / "experiments"
         base = Path(cache_dir) if cache_dir else Path(os.environ.get("SUBSTRATE_CACHE_DIR") or Path.home() / ".cache" / "substrate")
         self.cache_dir = base / "gui"
         self.registry = default_registry()
         self.pipeline = Pipeline(self.registry)
-        self.jobs = JobManager(max_jobs)
+        self.jobs = JobManager(max_jobs, inline=inline_jobs)
         self._pyscf: bool | None = None
         self._references: dict[str, Reference] = {}
         self._reference_lock = threading.Lock()

@@ -672,7 +672,9 @@ The API the page uses: `GET /api/status`, `/api/experiments`, `/api/experiment`,
 
 It listens on 127.0.0.1 and nowhere else unless asked. **A public demo** is an opt-in mode: `--bind 0.0.0.0` is refused unless at least one `--allow-host NAME` says which host name the server answers
 to (no wildcards); the Host and Origin checks then accept exactly those names as well as the local ones, and `--max-jobs` (2 by default in this mode) caps the jobs running at once, so a visitor gets
-HTTP 429, "the server is busy", and not the whole machine. [deploy/huggingface/](deploy/huggingface/README.md) builds a Hugging Face Space that way.
+HTTP 429, "the server is busy", and not the whole machine. [deploy/huggingface/](deploy/huggingface/README.md) builds a Hugging Face Space that way (a Docker Space, which Hugging Face offers only
+with a PRO subscription), or, for a free account, a **static** Space that runs the same page and the same Python in the visitor's own browser (Pyodide, WebAssembly): no server, so nothing to cap, and
+numbers recomputed there can differ slightly from native ones (measured, and stated on its card).
 
 ## What it found
 
@@ -736,7 +738,7 @@ src/substrate/
   molecules.py                                  templates: Zundel, ammonium dimer, bifluoride, water–ammonia, methanol–water, ...
   gui/                                          the local web GUI: standard-library server, plain HTML/JS, no build step, no external requests
 deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, a Helm chart, Prometheus, Grafana, Tempo and OpenTelemetry configuration, verify_networks.py;
-                                                huggingface/ builds and uploads a Hugging Face Space that runs the GUI as a public demo
+                                                huggingface/ builds and uploads a Hugging Face Space (Docker, or static and in the browser) that runs the GUI as a demo
 experiments/                                    runnable experiment files; references/ (24 real surfaces) and benchmarks/ (8 bifluoride surfaces)
 examples/                                       the scripts in the table above
 tests/                                          1,956 tests

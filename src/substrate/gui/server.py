@@ -22,6 +22,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ..errors import SubstrateError
+from . import api
 from . import serialize as ser
 from .app import App, GuiError
 
@@ -96,26 +97,7 @@ class Handler(BaseHTTPRequestHandler):
             self._error(500, f"{type(error).__name__}: {error}")
 
     def _api_get(self, path: str, q: dict):
-        if path == "/api/status":
-            return self.app.status()
-        if path == "/api/experiments":
-            return {"experiments": self.app.list_experiments()}
-        if path == "/api/experiment":
-            return self.app.experiment(q.get("path", ""))
-        if path == "/api/job":
-            try:
-                since = int(q.get("since", 0))
-            except ValueError:
-                raise GuiError("since must be an integer") from None
-            return self.app.jobs.get(q.get("id", "")).to_dict(since)
-        if path == "/api/references":
-            return {"references": self.app.references_listing()}
-        if path == "/api/transfer":
-            names = [n for n in q.get("refs", "").split(",") if n]
-            names = self.app._check_names(names)
-            cached = self.app.cached_transfer(names)
-            return {"cached": cached is not None, "result": cached}
-        raise GuiError(f"no such endpoint {path}", 404)
+        return api.get(self.app, path, q)
 
     def _static(self, path: str):
         name = "index.html" if path in ("/", "") else path.removeprefix("/static/") if path.startswith("/static/") else None
@@ -157,21 +139,7 @@ class Handler(BaseHTTPRequestHandler):
             self._error(500, f"{type(error).__name__}: {error}")
 
     def _api_post(self, path: str, b: dict):
-        app = self.app
-        if path == "/api/run":
-            return app.start_run(b.get("path", ""), b.get("overrides"), b.get("samples"), b.get("seed"))
-        if path == "/api/transfer/run":
-            names, recompute = app._check_names(b.get("refs")), bool(b.get("recompute"))
-            return app.start_job("transfer study", lambda log: app.run_transfer(names, recompute, log))
-        if path == "/api/transfer/rates":
-            names, barrier = app._check_names(b.get("refs")), b.get("barrier", 0.4)
-            return app.start_job("downstream rates", lambda log: app.run_rates(names, barrier, log))
-        if path == "/api/transfer/learning":
-            names = app._check_names(b.get("refs"))
-            target, source = b.get("target"), b.get("source") or None
-            sigmas, counts = b.get("sigmas", [0.3]), b.get("counts", [0, 1, 2, 3, 6])
-            return app.start_job("learning curve", lambda log: app.run_learning(names, target, source, sigmas, counts, log))
-        raise GuiError(f"no such endpoint {path}", 404)
+        return api.post(self.app, path, b)
 
 
 class Server(ThreadingHTTPServer):

@@ -1,7 +1,36 @@
 # Mission control as a Hugging Face Space
 
-`build_space.py` assembles a Docker Space that runs the local GUI (`python -m substrate gui`) as a public demo, and `upload_space.py` puts it on Hugging Face. Nothing here is part of the
-package: it is the recipe for one deployment, kept so that the Space can be rebuilt from a commit.
+There are two ways to put Mission control on Hugging Face, and the difference is who pays and where the Python runs:
+
+| | runs the Python | free account | built by |
+|---|---|---|---|
+| **Static Space** (below, "in the browser") | in the visitor's browser (Pyodide, WebAssembly) | yes | `build_static_space.py` |
+| **Docker Space** (the rest of this file) | on Hugging Face's server (the local GUI in its public mode) | **no: needs PRO** | `build_space.py` |
+
+`upload_space.py` puts either folder on Hugging Face (private first). Nothing here is part of the package: it is the recipe for one deployment, kept so that the Space can be rebuilt from a commit.
+
+## A static Space: the demo, in the visitor's browser
+
+```bash
+python deploy/huggingface/build_static_space.py ../space --space-id Hastika06/substrate-mission-control --cache-dir ~/.cache/substrate
+python deploy/huggingface/upload_space.py ../space --space-id Hastika06/substrate-mission-control       # private; --public is a separate, later step
+```
+
+A static Space only serves files, so there is no server to run the GUI on. Instead the page is the GUI's own, and a small shim (`static_space/web_shim.js`) answers its `/api/...` calls from a web
+worker (`static_space/worker.js`) running [Pyodide](https://pyodide.org) (CPython compiled to WebAssembly; version pinned, loaded from the jsDelivr CDN) with numpy, scipy and PyYAML. The worker
+unpacks `bundle.zip` (the package source, the experiments, the energy cache and the transfer study) and answers with `substrate.gui.api`, the same code the local server runs. A job runs to its
+end inside the request that started it, because a worker has no threads (`App(inline_jobs=True)`), so the page shows a job's log only once it is over.
+
+- The 24-surface study is computed by the builder, natively, from the very files in the bundle (a saved study is keyed to their bytes, and the test `test_the_study_in_the_bundle_is_the_one_the_gui_looks_up_for_the_bundles_own_files` holds that), so its matrix opens at once.
+- Anything else is computed in the visitor's browser: about 25 seconds for eight surfaces on the machine it was tried on.
+- **Numbers recomputed in the browser can differ from native ones.** Pyodide's numpy/scipy are not the versions the project is locked to. Compared with a native run: one real-chemistry experiment, identical
+  (237 of 237 numbers); a three-surface study, median relative difference 8e-8 and 90% under 1e-5, but 10 of 3,393 numbers off by more than 1e-3 and a few near-threshold outcomes flipped (a second well or a barrier found
+  or not, on the bifluoride surface). The card says so.
+- It needs a browser with WebAssembly and web workers, downloads about 40 MB on the first visit, and fetches Pyodide from a CDN, so it does not run offline.
+
+## A Docker Space: the local GUI as a server
+
+`build_space.py` assembles a Docker Space that runs the local GUI (`python -m substrate gui`) as a public demo.
 
 ```bash
 # 1. a folder holding exactly what the Space ships (it refuses a folder that is not empty)

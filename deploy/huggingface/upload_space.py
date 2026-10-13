@@ -1,4 +1,4 @@
-"""Create the Space on Hugging Face and upload a folder built by build_space.py.
+"""Create the Space on Hugging Face and upload a folder built by build_space.py (a Docker Space) or build_static_space.py (a static one).
 
     hf auth login                                   # once, in your own terminal: the token is typed there, never into a command line or a chat
     python deploy/huggingface/upload_space.py OUTDIR --space-id Hastika06/substrate-mission-control
@@ -6,7 +6,8 @@
 It uses the login `hf auth login` stored (or HF_TOKEN in the environment); this file never reads, accepts or prints a token. The Space is created **private**; pass
 --public to make it visible to everyone (a separate, deliberate step, and one that search engines and copies can outlive).
 
-Before anything is sent it checks the folder: a Dockerfile and a card that says `sdk: docker`, and no file that looks like a secret.
+Before anything is sent it checks the folder: a card that says `sdk: docker` (with a Dockerfile) or `sdk: static` (with an index.html), and no file that looks like a secret.
+A Docker Space needs a Hugging Face PRO subscription on the free hardware; a static Space does not.
 """
 from __future__ import annotations
 
@@ -17,23 +18,35 @@ from pathlib import Path
 
 SECRET_NAMES = re.compile(r"(^|/)(\.env[^/]*|id_rsa[^/]*|id_ed25519[^/]*|[^/]*\.pem|[^/]*\.key|[^/]*\.p12|[^/]*\.pfx|credentials[^/]*|[^/]*token[^/]*|\.netrc|\.git(/.*)?)$", re.I)
 MAX_BYTES = 200 * 1024 * 1024
+NEEDED = {"docker": "Dockerfile", "static": "index.html"}              # the file each kind of Space cannot do without, besides its card
 
 
 class UploadError(Exception):
     """The folder or the account is not ready. The message says what to do."""
 
 
+def space_sdk(folder: Path) -> str:
+    """`docker` or `static`, as the folder's card declares it, or UploadError."""
+    card_path = folder / "README.md"
+    if not card_path.is_file():
+        raise UploadError(f"{folder} has no README.md")
+    card = card_path.read_text(encoding="utf-8")
+    found = re.search(r"(?m)^sdk:\s*(docker|static)\s*$", card.split("---")[1] if card.startswith("---") else "")
+    if not found:
+        raise UploadError("the README.md card does not declare `sdk: docker` or `sdk: static`")
+    return found.group(1)
+
+
 def check_folder(folder: Path) -> list[str]:
-    """The files that would be uploaded, or UploadError. A Space folder has a Dockerfile and a card for a Docker Space, and nothing that looks like a secret."""
+    """The files that would be uploaded, or UploadError. A Space folder has its card and the file its kind needs, and nothing that looks like a secret."""
     if not folder.is_dir():
-        raise UploadError(f"{folder} is not a folder (build one with build_space.py)")
+        raise UploadError(f"{folder} is not a folder (build one with build_space.py or build_static_space.py)")
     files = sorted(str(p.relative_to(folder)).replace("\\", "/") for p in folder.rglob("*") if p.is_file())
-    for needed in ("Dockerfile", "README.md"):
-        if needed not in files:
-            raise UploadError(f"{folder} has no {needed}")
-    card = (folder / "README.md").read_text(encoding="utf-8")
-    if not re.search(r"(?m)^sdk:\s*docker\s*$", card.split("---")[1] if card.startswith("---") else ""):
-        raise UploadError("the README.md card does not declare `sdk: docker`")
+    if "README.md" not in files:
+        raise UploadError(f"{folder} has no README.md")
+    needed = NEEDED[space_sdk(folder)]
+    if needed not in files:
+        raise UploadError(f"{folder} has no {needed}")
     suspicious = [f for f in files if SECRET_NAMES.search(f)]
     if suspicious:
         raise UploadError(f"these files look like secrets and will not be uploaded: {', '.join(suspicious[:5])}")
@@ -50,6 +63,7 @@ def main(argv=None, api=None) -> int:
     args = parser.parse_args(argv)
     try:
         files = check_folder(args.folder)
+        sdk = space_sdk(args.folder)
     except UploadError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -67,8 +81,8 @@ def main(argv=None, api=None) -> int:
         return 1
     commit = (args.folder / "SOURCE_COMMIT").read_text(encoding="utf-8").strip()[:7] if (args.folder / "SOURCE_COMMIT").is_file() else "unknown"
     try:
-        api.create_repo(args.space_id, repo_type="space", space_sdk="docker", private=not args.public, exist_ok=True)
-        api.upload_folder(folder_path=str(args.folder), repo_id=args.space_id, repo_type="space", commit_message=f"Mission control demo (source commit {commit})")
+        api.create_repo(args.space_id, repo_type="space", space_sdk=sdk, private=not args.public, exist_ok=True)
+        api.upload_folder(folder_path=str(args.folder), repo_id=args.space_id, repo_type="space", commit_message=f"Mission control demo, {sdk} (source commit {commit})")
         if args.public:
             api.update_repo_settings(repo_id=args.space_id, repo_type="space", private=False)
     except Exception as error:                                         # noqa: BLE001 (a refusal from the Hub is an answer, not a crash: show what it said)
