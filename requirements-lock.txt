@@ -1,4 +1,4 @@
-# The runtime dependencies at the versions the tests are run with (Python 3.10 to 3.12; wheels exist on Windows and Linux). The studies in the docs were produced on numpy 1.26.4, scipy 1.14.0 and
+# The runtime dependencies at the versions the tests are run with (Python 3.10 to 3.13; wheels exist on Windows and Linux). The studies in the docs were produced on numpy 1.26.4, scipy 1.14.0 and
 # PyYAML 6.0.1 and were not re-run on these.
 # Used by CI to audit for known vulnerabilities and to produce the software bill of materials, and as a constraint when installing:
 #     pip install -e . -c requirements-lock.txt
