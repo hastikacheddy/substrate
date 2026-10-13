@@ -354,13 +354,24 @@ def test_the_learning_curve_payload(study):
     assert scratch[1]["note"] and scratch[1]["rmse"] is None                                        # one distance cannot be fitted from scratch, and it says so
 
 
-def test_a_quantum_chemistry_reference_is_refused_clearly_when_pyscf_is_missing(study, monkeypatch):
-    qc = study.experiments_dir / "references" / "qc_x.yaml"
-    qc.write_text(SYNTHETIC.format(name="Q", coupling=0.6, hint="").replace("electronic.evb_two_state_2d", "electronic.qc_scan_2d"))
+def test_a_quantum_chemistry_reference_is_refused_clearly_when_an_energy_is_missing_and_pyscf_is_too(study, monkeypatch):
+    from substrate.errors import QCUnavailableError
+
+    def missing(*args, **kwargs):
+        raise QCUnavailableError("PySCF is not available. Install it (pip install pyscf)")
+    monkeypatch.setattr(study, "_references", {})
     monkeypatch.setattr(study, "_pyscf", False)
+    monkeypatch.setattr(study.pipeline, "run", missing)
     with pytest.raises(GuiError, match="PySCF is not available") as error:
-        study.reference("qc_x")
-    assert error.value.status == 503
+        study.reference("syn_a")
+    assert error.value.status == 503 and "not in the on-disk cache" in str(error.value) and "setup_qc_env" in str(error.value)
+
+
+def test_without_pyscf_a_reference_whose_energies_are_stored_is_still_served(study, monkeypatch):
+    """The guard used to refuse every quantum-chemistry reference when PySCF was missing; what matters is whether an energy is missing."""
+    monkeypatch.setattr(study, "_references", {})
+    monkeypatch.setattr(study, "_pyscf", False)
+    assert study.reference("syn_a").name == "syn_a"
 
 
 def test_each_reference_in_the_payload_carries_its_own_fit_window(study):

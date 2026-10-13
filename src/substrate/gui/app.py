@@ -18,7 +18,7 @@ import numpy as np
 from .. import __version__ as VERSION
 from ..calibration import FitSettings
 from ..defaults import default_registry
-from ..errors import SubstrateError, ValidationError
+from ..errors import QCUnavailableError, SubstrateError, ValidationError
 from ..experiment import load_experiment, read_spec
 from ..ir import Quantity
 from ..pipeline import Pipeline
@@ -300,13 +300,14 @@ class App:
                 return self._references[name]
             path = self._reference_path(name)
             experiment = load_experiment(path)
-            if experiment.system.kind.startswith("electronic.qc") and not self.pyscf_available():
-                raise GuiError("these references are real quantum-chemistry surfaces and PySCF is not available here "
-                               "(on Windows run scripts/setup_qc_env.sh in WSL); energies already in the on-disk cache are used when it is", 503)
             started = time.perf_counter()
             if log:
                 log(f"{name}: reading the scan (energies come from the on-disk cache where they exist)")
-            solved = self.pipeline.run(experiment.system, experiment.propagation).final
+            try:
+                solved = self.pipeline.run(experiment.system, experiment.propagation).final
+            except QCUnavailableError as error:                 # stored energies need no program; only a missing one does, so the refusal is made when one is found missing
+                raise GuiError(f"{name} is a real quantum-chemistry surface, PySCF is not available here, and an energy it needs is not in the on-disk cache ({error}). "
+                               "Stored energies are used without PySCF; new ones need it (on Windows run scripts/setup_qc_env.sh in WSL)", 503) from None
             if log:
                 run, cached = solved.obs("calculations_run", default=None), solved.obs("calculations_cached", default=None)
                 log(f"{name}: " + (f"{run:.0f} computed, {cached:.0f} cached" if run is not None else "a model surface")
