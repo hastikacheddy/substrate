@@ -147,7 +147,8 @@ translator; if the physics does not support a hop, the run stops with the reason
 ## What this demo cannot do
 
 - **No new quantum chemistry.** PySCF is not installed. The real-chemistry experiments read {energies:,} energies that were computed with PySCF and stored (the energy cache);
-  anything that needs an energy that is not stored fails with a message saying so. That includes the "downstream rates" panel, which runs the real chain at new distances.
+  anything that needs an energy that is not stored fails with a message saying so. The "downstream rates" panel runs the real chain at the distance where a barrier height is
+  reached: it works where that distance is already stored (the default 0.4 eV, for most surfaces) and shows a dash, with the reason, where it is not.
 - **It shares a small CPU with everyone.** At most {MAX_JOBS} jobs run at once (a third gets "the server is busy"), and an ensemble is limited to {MAX_ENSEMBLE} draws.
 - **It is a research prototype.** The chemistry is a testbed on rigid, gas-phase scans, not a prediction of any real system's kinetics. Read the limits before quoting a number:
   [docs/limits.md]({GITHUB}/blob/main/docs/limits.md).

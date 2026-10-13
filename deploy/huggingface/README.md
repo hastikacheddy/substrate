@@ -24,7 +24,8 @@ python deploy/huggingface/upload_space.py ../space --space-id Hastika06/substrat
   ensemble small. The container runs as an ordinary user, with no secrets in it.
 - **The stored energies, not new chemistry.** PySCF is not installed. The real-chemistry experiments read the energy cache (`qc.sqlite3`, thousands of PySCF energies, numbers only) from
   `--cache-dir`; the builder copies it with SQLite's backup API and **stops if any value contains a user name, a home or drive path or a host name**, leaving nothing behind. Anything that
-  needs an energy that is not stored fails with a message saying so (the "downstream rates" panel, which runs the real chain at new distances, is one).
+  needs an energy that is not stored fails with a message saying so. The "downstream rates" panel is the one place this shows up in a finished job: it runs the real chain at the distance where a
+  barrier height is reached, which is stored for the default 0.4 eV on most surfaces (23 of 24 when checked) and for few at 0.1, 0.9 or 1.3 eV, where a cell shows a dash and its tooltip says why.
 - **The transfer study is computed in the image.** Saved studies are not copied from your machine: a study is keyed to the exact bytes of the reference files it was made from, so one made
   here goes stale as soon as any of them changes (all seven of the author's did). `prewarm.py` runs the full study from the stored energies while the image is built, which also makes
   the build fail, rather than the Space, if an energy is missing. With no `--cache-dir` there is nothing to compute it from, so the step is left out.
