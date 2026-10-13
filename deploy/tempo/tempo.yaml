@@ -11,7 +11,13 @@ distributor:
         http:
           endpoint: 0.0.0.0:4318
 
-compactor:
+# Tempo 3 removed the compactor: the backend scheduler decides when blocks are compacted and deleted, and the backend worker does it (both run inside the single binary).
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        block_retention: 168h
+backend_worker:
   compaction:
     block_retention: 168h
 
