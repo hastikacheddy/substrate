@@ -66,10 +66,17 @@ def main(argv=None, api=None) -> int:
         print(f"error: you are logged in as {account['name']}; {args.space_id.split('/')[0]} is not you or one of your organizations", file=sys.stderr)
         return 1
     commit = (args.folder / "SOURCE_COMMIT").read_text(encoding="utf-8").strip()[:7] if (args.folder / "SOURCE_COMMIT").is_file() else "unknown"
-    api.create_repo(args.space_id, repo_type="space", space_sdk="docker", private=not args.public, exist_ok=True)
-    api.upload_folder(folder_path=str(args.folder), repo_id=args.space_id, repo_type="space", commit_message=f"Mission control demo (source commit {commit})")
-    if args.public:
-        api.update_repo_settings(repo_id=args.space_id, repo_type="space", private=False)
+    try:
+        api.create_repo(args.space_id, repo_type="space", space_sdk="docker", private=not args.public, exist_ok=True)
+        api.upload_folder(folder_path=str(args.folder), repo_id=args.space_id, repo_type="space", commit_message=f"Mission control demo (source commit {commit})")
+        if args.public:
+            api.update_repo_settings(repo_id=args.space_id, repo_type="space", private=False)
+    except Exception as error:                                         # noqa: BLE001 (a refusal from the Hub is an answer, not a crash: show what it said)
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+        reason = str(error).split("\n", 1)[-1].strip() if status == 402 else type(error).__name__
+        print(f"error: Hugging Face refused or failed ({status or type(error).__name__}): {reason}. Nothing was made public.", file=sys.stderr)
+        return 1
     print(f"uploaded {len(files)} files to https://huggingface.co/spaces/{args.space_id} ({'public' if args.public else 'private'}); it builds there now")
     return 0
 

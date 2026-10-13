@@ -221,6 +221,36 @@ def test_not_being_logged_in_says_how_to_log_in_and_never_echoes_what_the_librar
     assert "hf auth login" in err and "HF_TOKEN" in err and "THISMUSTNEVERBEPRINTED" not in err
 
 
+class HubRefusal(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.response = type("Response", (), {"status_code": status})()
+
+
+class RefusingApi(FakeApi):
+    def __init__(self, status, message):
+        super().__init__()
+        self.refusal = HubRefusal(status, message)
+
+    def create_repo(self, repo_id, **kw):
+        raise self.refusal
+
+
+def test_a_payment_required_refusal_is_reported_as_what_it_is_and_nothing_is_uploaded(folder, capsys):
+    api = RefusingApi(402, "402 Client Error: Payment Required for url: https://huggingface.co/api/repos/create (Request ID: x)\n\nDocker Spaces on free cpu-basic require a PRO subscription.")
+    assert upload.main([str(folder), "--space-id", SPACE], api=api) == 1
+    err = capsys.readouterr().err
+    assert "402" in err and "PRO subscription" in err and "Nothing was made public" in err and "Traceback" not in err
+    assert api.calls == []                                                                              # create_repo failed: no upload, no flip to public
+
+
+def test_another_refusal_shows_its_kind_but_not_the_hub_s_text(folder, capsys):
+    api = RefusingApi(500, "boom\nthe request carried Bearer hf_THISMUSTNEVERBEPRINTED")
+    assert upload.main([str(folder), "--space-id", SPACE], api=api) == 1
+    err = capsys.readouterr().err
+    assert "500" in err and "THISMUSTNEVERBEPRINTED" not in err
+
+
 def test_a_space_under_somebody_elses_name_is_refused(folder, capsys):
     api = FakeApi()
     assert upload.main([str(folder), "--space-id", "someone-else/x"], api=api) == 1 and api.calls == []

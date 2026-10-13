@@ -33,6 +33,10 @@ python deploy/huggingface/upload_space.py ../space --space-id Hastika06/substrat
 
 ## Things to know
 
+- **A Docker Space on free hardware needs a Hugging Face PRO subscription.** On 2026-10-13 creating one from a free account was refused with `402 Payment Required` ("Static Spaces are free for
+  everyone, but hosting Gradio and Docker Spaces on free cpu-basic requires a PRO subscription"). The uploader reports that refusal and stops; nothing is created. The GUI is a Python server, so a
+  static Space cannot stand in for it.
+
 - A **private** Space is visible only to its owner. Making it public is `upload_space.py ... --public`, or the switch in the Space's settings; copies and search indexes can outlive a later deletion.
 - The Space is served from `https://<owner>-<name>.hf.space` (lower-case, dots and underscores turned into hyphens); that is the host name the GUI is told to accept. If Hugging Face's own health
   checks or proxy use another Host header, the GUI answers 403 to them: the Space's logs say so, and `--allow-host` takes more than one name.
