@@ -1,7 +1,8 @@
 'use strict';
 /* Runs Mission control's Python in the visitor's own browser, in a web worker: Pyodide (CPython compiled to WebAssembly) with the project's source,
    experiments and stored energies unpacked from bundle.zip. It answers the page's /api requests with the same code the local server uses (substrate.gui.api),
-   one at a time, and a job runs to its end inside the request that started it, because a browser worker has no threads to run it on. */
+   one at a time, and a job runs to its end inside the request that started it, because a browser worker has no threads to run it on.
+   bundle.zip is fetched by the page and handed over, not fetched here: on a private Space the host authorises the page's own requests but refuses a worker's (a 401, seen on Hugging Face). */
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.28.3/full/';
 importScripts(PYODIDE + 'pyodide.js');
 
@@ -23,16 +24,18 @@ def handle(method, target, body):
 
 let handle = null;
 let failure = null;
+let giveBundle;
+const bundle = new Promise(resolve => { giveBundle = resolve; });
 
 const ready = (async () => {
   say('loading Python (the first visit downloads about 40 MB)…');
   const py = await loadPyodide({ indexURL: PYODIDE });
   say('loading numpy and scipy…');
   await py.loadPackage(['numpy', 'scipy', 'pyyaml', 'sqlite3']);
+  say('waiting for the models and the stored energies…');
+  const bytes = await bundle;
   say('unpacking the models and the stored energies…');
-  const response = await fetch('bundle.zip');
-  if (!response.ok) throw new Error(`bundle.zip: ${response.status} ${response.statusText}`);
-  py.unpackArchive(await response.arrayBuffer(), 'zip', { extractDir: '/bundle' });
+  py.unpackArchive(bytes, 'zip', { extractDir: '/bundle' });
   say('starting…');
   py.runPython(BOOT);
   handle = py.globals.get('handle');
@@ -43,6 +46,7 @@ const ready = (async () => {
 });
 
 onmessage = async ({ data }) => {
+  if (data.type === 'bundle') return giveBundle(data.bytes);
   const { id, method, target, body } = data;
   const reply = (status, text) => postMessage({ id, status, text });
   await ready;

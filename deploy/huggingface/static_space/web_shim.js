@@ -1,6 +1,7 @@
 'use strict';
 /* In the static demo there is no server: the page's calls to /api/... are handed to a web worker that runs the project's Python (worker.js) in this browser.
-   This must load before app.js, which only ever calls fetch('/api/...'). Everything else (the page's own files) still goes to the network as usual. */
+   This must load before app.js, which only ever calls fetch('/api/...'). Everything else (the page's own files) still goes to the network as usual.
+   The page, not the worker, downloads bundle.zip and hands it over: on a private Space the host authorises the page's requests and refuses the worker's (401). */
 (() => {
   const realFetch = window.fetch.bind(window);
   const pending = new Map();
@@ -31,6 +32,10 @@
       if (resolve) { pending.delete(data.id); resolve(response(data.status, data.text)); }
     };
     worker.onerror = event => fail(`the Python worker stopped: ${event.message || 'it could not be loaded'}`);
+    realFetch('bundle.zip')
+      .then(res => { if (!res.ok) throw new Error(`bundle.zip: ${res.status} ${res.statusText}`); return res.arrayBuffer(); })
+      .then(bytes => worker.postMessage({ type: 'bundle', bytes }, [bytes]))
+      .catch(error => fail(`the models and stored energies could not be downloaded: ${error.message}`));
   }
 
   function ask(method, target, body) {

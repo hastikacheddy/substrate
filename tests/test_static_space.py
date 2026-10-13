@@ -178,8 +178,11 @@ def test_the_command_line_reports_a_refusal_and_exits_nonzero(tmp_path, capsys):
 def test_the_worker_loads_a_pinned_pyodide_and_the_bundle_the_builder_writes_and_the_shim_starts_that_worker():
     worker = (HF / "static_space" / "worker.js").read_text(encoding="utf-8")
     shim = (HF / "static_space" / "web_shim.js").read_text(encoding="utf-8")
-    assert f"/pyodide/v{static.PYODIDE_VERSION}/full/" in worker and "latest" not in worker and "bundle.zip" in worker
+    assert f"/pyodide/v{static.PYODIDE_VERSION}/full/" in worker and "latest" not in worker
     assert "new Worker('worker.js')" in shim and "/api/" in shim
+    # a private Space's host authorises the page's requests and refuses a worker's (a 401, seen on Hugging Face): the page fetches the bundle and hands it over
+    assert "fetch(" not in worker.replace("loadPyodide", "") and "importScripts(" in worker                    # the worker requests nothing itself but the pinned CDN script
+    assert "realFetch('bundle.zip')" in shim and "type: 'bundle'" in shim and "data.type === 'bundle'" in worker
     for package in ("numpy", "scipy", "pyyaml", "sqlite3"):
         assert f"'{package}'" in worker
     assert "SUBSTRATE_MAX_ENSEMBLE" in worker and "inline_jobs=True" in worker
