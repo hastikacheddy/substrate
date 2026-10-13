@@ -39,8 +39,7 @@ def cache(tmp_path):
         db.execute("CREATE TABLE energies (key TEXT PRIMARY KEY, payload TEXT)")
         db.executemany("INSERT INTO energies VALUES (?, ?)", [("aa11", json.dumps({"energy": -1.5, "converged": True, "program": "pyscf 2.14.0"})),
                                                               ("bb22", json.dumps({"energy": -2.5, "converged": True, "program": "pyscf 2.14.0"}))])
-    (folder / "gui" / "transfer-abc123.json").write_text(json.dumps({"names": ["a", "b"], "matrix": [[0, 1], [1, 0]]}), encoding="utf-8")
-    (folder / "gui" / "notes.txt").write_text("not a study result", encoding="utf-8")
+    (folder / "gui" / "transfer-abc123.json").write_text(json.dumps({"names": ["a", "b"], "matrix": [[0, 1], [1, 0]]}), encoding="utf-8")      # a saved study: stale by design, never shipped
     return folder
 
 
@@ -62,10 +61,10 @@ def test_the_space_holds_the_tracked_sources_the_cache_and_the_two_generated_fil
     out = tmp_path / "space"
     summary = build.build(out, SPACE, cache)
     for needed in ("Dockerfile", "README.md", "SOURCE_COMMIT", "pyproject.toml", "requirements-lock.txt", "src/substrate/__init__.py", "src/substrate/gui/static/index.html",
-                   "src/substrate/gui/static/app.js", "experiments/proton_transfer.yaml", "cache/qc.sqlite3", "cache/gui/transfer-abc123.json"):
+                   "src/substrate/gui/static/app.js", "experiments/proton_transfer.yaml", "cache/qc.sqlite3", "prewarm.py"):
         assert (out / needed).is_file(), needed
-    assert not (out / "cache" / "gui" / "notes.txt").exists()                                       # only the saved study results are copied, not whatever else is there
-    assert summary["host"] == HOST and summary["energies"] == 2 and summary["studies"] == 1 and summary["references"] >= 20
+    assert not (out / "cache" / "gui").exists() and not list(out.rglob("transfer-*.json"))           # a saved study is keyed to the bytes of the files it was made from: it is computed in the image
+    assert summary["host"] == HOST and summary["energies"] == 2 and "studies" not in summary and summary["references"] >= 20
     with sqlite3.connect(out / "cache" / "qc.sqlite3") as db:
         assert db.execute("SELECT COUNT(*) FROM energies").fetchone()[0] == 2
     assert not (out / "tests").exists() and not (out / "deploy").exists() and not list(out.rglob("__pycache__")) and not list(out.rglob("*.pyc"))
@@ -90,6 +89,7 @@ def test_the_dockerfile_runs_as_a_user_listens_on_the_space_port_and_answers_to_
     text = (out / "Dockerfile").read_text(encoding="utf-8")
     assert "FROM python:3.13-slim-bookworm" in text and "useradd --create-home --uid 1000 user" in text and "\nUSER user\n" in text
     assert "EXPOSE 7860" in text and 'CMD ["python", "-m", "substrate", "gui"' in text
+    assert text.index("COPY --chown=user cache") < text.index("RUN python prewarm.py") < text.index("EXPOSE 7860")        # the study is computed from the stored energies, then the server starts
     cmd = json.loads(text[text.index("CMD ") + 4:].strip())
     assert cmd[cmd.index("--bind") + 1] == "0.0.0.0" and cmd[cmd.index("--port") + 1] == "7860" and cmd[cmd.index("--max-jobs") + 1] == "2"
     assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--allow-host"] == [HOST]                    # exactly one name, and it is this Space's
@@ -107,6 +107,7 @@ def test_the_card_is_a_docker_space_with_the_license_left_open_and_says_what_it_
     front = yaml.safe_load(card.split("---")[1])
     assert front["sdk"] == "docker" and front["app_port"] == 7860 and front["license"] == "other" and len(front["short_description"]) <= 60
     assert "No new quantum chemistry" in card and "PySCF is not installed" in card and "2 energies" in card and "At most 2 jobs" in card
+    assert "computed when the Space is built" in card and "saved study" not in card and "downstream rates" in card
     assert "https://github.com/hastikacheddy/substrate" in card and "docs/limits.md" in card and "research prototype" in card
     commit = (out / "SOURCE_COMMIT").read_text(encoding="utf-8").strip()
     assert commit == "unknown" or len(commit) == 40
@@ -117,7 +118,10 @@ def test_the_card_is_a_docker_space_with_the_license_left_open_and_says_what_it_
 def test_without_a_cache_the_space_says_so_instead_of_pretending(tmp_path):
     out = tmp_path / "space"
     summary = build.build(out, SPACE, None)
-    assert summary["energies"] == 0 and (out / "cache" / "README.txt").is_file() and "0 energies" in (out / "README.md").read_text(encoding="utf-8")
+    assert summary["energies"] == 0 and (out / "cache" / "README.txt").is_file()
+    card = (out / "README.md").read_text(encoding="utf-8")
+    assert "no stored energies" in card and "computed when the Space is built" not in card
+    assert "prewarm" not in (out / "Dockerfile").read_text(encoding="utf-8") and not (out / "prewarm.py").exists()          # there is nothing to compute a study from, and a build that tried would fail
 
 
 # -- what the builder refuses -----------------------------------------------------------------------------------------------------------------
@@ -139,15 +143,6 @@ def test_a_cache_value_that_shows_this_machine_stops_the_build_and_leaves_nothin
     out = tmp_path / "space"
     with pytest.raises(build.BuildError, match="publish something from this machine"):
         build.build(out, SPACE, cache, extra_markers=("hasti",))
-    assert not out.exists() or not any(out.iterdir())
-
-
-@needs_git
-def test_a_saved_study_that_shows_this_machine_stops_the_build_too(tmp_path, cache):
-    (cache / "gui" / "transfer-evil.json").write_text(json.dumps({"path": "C:\\Users\\someone\\x"}), encoding="utf-8")
-    out = tmp_path / "space"
-    with pytest.raises(build.BuildError, match="transfer-evil.json"):
-        build.build(out, SPACE, cache)
     assert not out.exists() or not any(out.iterdir())
 
 

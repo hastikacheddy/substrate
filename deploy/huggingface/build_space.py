@@ -5,10 +5,11 @@
 What goes in the folder, and nothing else:
 
 * the package source, the experiments folder and the locked runtime versions, as they are in git at HEAD (so the Space is a snapshot of a commit, which the card names);
-* the energy cache and the saved transfer-study results from `--cache-dir`, copied with SQLite's backup API (a consistent copy, no write-ahead files) and **scanned
-  first**: the build stops if any stored value contains a user name, a drive or home path or a host name, so nothing from this machine is published by accident;
-* a Dockerfile (a non-root user, port 7860, the Space's own host name as the only extra host the GUI answers to, two jobs at once, a smaller ensemble limit) and the
-  Space's README card (license "other": none has been chosen).
+* the energy cache from `--cache-dir`, copied with SQLite's backup API (a consistent copy, no write-ahead files) and **scanned first**: the build stops if any stored value
+  contains a user name, a drive or home path or a host name, so nothing from this machine is published by accident;
+* a Dockerfile (a non-root user, port 7860, the Space's own host name as the only extra host the GUI answers to, two jobs at once, a smaller ensemble limit) that also
+  computes the full transfer study from the stored energies while the image is built (prewarm.py), and the Space's README card (license "other": none has been chosen).
+  Saved studies are not copied from this machine: they are keyed to the exact bytes of the reference files and go stale the moment one differs.
 
 It refuses to write into a folder that is not empty. It never reads a token and does not talk to Hugging Face; `upload_space.py` does that.
 """
@@ -88,20 +89,14 @@ def copy_energy_cache(source: Path, target: Path, markers: tuple[str, ...]) -> i
     return count
 
 
-def copy_study_results(source: Path, target: Path, markers: tuple[str, ...]) -> int:
-    """The saved transfer-study results (the GUI's `gui/transfer-*.json`), each checked and parsed as JSON before it is copied."""
-    count = 0
-    for path in sorted(source.glob("transfer-*.json")) if source.is_dir() else []:
-        text = path.read_text(encoding="utf-8")
-        _scan(path.name, text, markers)
-        json.loads(text)
-        target.mkdir(parents=True, exist_ok=True)
-        (target / path.name).write_text(text, encoding="utf-8")
-        count += 1
-    return count
+PREWARM = """# The full transfer study, computed here from the stored energies and the files in this image, so the first visitor is not the one who waits for it (and a missing energy fails the build).
+COPY --chown=user prewarm.py ./prewarm.py
+RUN python prewarm.py
+"""
 
 
-def dockerfile(host: str) -> str:
+def dockerfile(host: str, prewarm: bool = True) -> str:
+    """The Space's Dockerfile. The study is computed at build time only when there are stored energies to compute it from."""
     return f'''# syntax=docker/dockerfile:1
 # Mission control, the substrate GUI, as a public demo. Built from {GITHUB} by deploy/huggingface/build_space.py.
 FROM python:3.13-slim-bookworm
@@ -115,14 +110,18 @@ COPY --chown=user src ./src
 RUN pip install --user -c requirements-lock.txt .
 COPY --chown=user experiments ./experiments
 COPY --chown=user cache /home/user/cache
-EXPOSE {PORT}
+{PREWARM if prewarm else ""}EXPOSE {PORT}
 # The GUI is a local tool; this is the one place it listens beyond loopback, so it is told exactly which host name it answers to.
 CMD ["python", "-m", "substrate", "gui", "--bind", "0.0.0.0", "--port", "{PORT}", "--no-browser", "--root", "/home/user/app", "--allow-host", "{host}", "--max-jobs", "{MAX_JOBS}"]
 '''
 
 
-def card(space_id: str, host: str, commit: str, energies: int, studies: int, references: int) -> str:
+def card(space_id: str, host: str, commit: str, energies: int, references: int) -> str:
     short = commit[:7]
+    study = (f"""- Explore the **transfer study**: {references} real energy surfaces (from quantum chemistry), the result of fitting one cheap model to each and predicting the others. The full
+  {references}-surface study is computed when the Space is built, so its matrix opens at once; any other selection is computed when you ask (it takes a while, and only {MAX_JOBS} jobs
+  run at once).
+""" if energies else "- **This build has no stored energies**, so only the model experiments work and there is no transfer study.\n")
     return f'''---
 title: Substrate Mission Control
 emoji: 🧪
@@ -144,21 +143,19 @@ translator; if the physics does not support a hop, the run stops with the reason
 ## What you can do here
 
 - Pick an experiment, **edit any input**, and watch the whole chain re-run, stage by stage, with the approximations each stage made.
-- Explore the **transfer study**: {references} real energy surfaces (from quantum chemistry) and the saved results of fitting one cheap model to each and predicting the others.
-  {studies} saved study results are included, so the matrices open at once.
-
+{study}
 ## What this demo cannot do
 
 - **No new quantum chemistry.** PySCF is not installed. The real-chemistry experiments read {energies:,} energies that were computed with PySCF and stored (the energy cache);
-  anything that needs an energy that is not stored fails with a message saying so.
+  anything that needs an energy that is not stored fails with a message saying so. That includes the "downstream rates" panel, which runs the real chain at new distances.
 - **It shares a small CPU with everyone.** At most {MAX_JOBS} jobs run at once (a third gets "the server is busy"), and an ensemble is limited to {MAX_ENSEMBLE} draws.
 - **It is a research prototype.** The chemistry is a testbed on rigid, gas-phase scans, not a prediction of any real system's kinetics. Read the limits before quoting a number:
   [docs/limits.md]({GITHUB}/blob/main/docs/limits.md).
 
 ## Where it comes from
 
-Source: [{GITHUB}]({GITHUB}), commit `{short}`. The Space is built from that commit by `deploy/huggingface/build_space.py`, with the energy cache and saved study results copied
-from the author's machine after a check that they hold nothing but numbers. Served at `https://{host}`.
+Source: [{GITHUB}]({GITHUB}), commit `{short}`. The Space is built from that commit by `deploy/huggingface/build_space.py`, with the energy cache copied from the author's
+machine after a check that it holds nothing but numbers. Served at `https://{host}`.
 
 License: none has been chosen yet, so the default copyright applies (all rights reserved); the card says `other`.
 
@@ -180,11 +177,10 @@ def build(out: Path, space_id: str, cache_dir: Path | None, extra_markers: tuple
             target = out / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
-        energies = studies = 0
+        energies = 0
         (out / "cache").mkdir()
         if cache_dir is not None:
             energies = copy_energy_cache(cache_dir / "qc.sqlite3", out / "cache" / "qc.sqlite3", markers)
-            studies = copy_study_results(cache_dir / "gui", out / "cache" / "gui", markers)
         else:
             (out / "cache" / "README.txt").write_text("no energy cache was supplied; only the model experiments work\n", encoding="utf-8")
     except BaseException:                                       # a failed build leaves nothing behind: the folder was empty or new when it started
@@ -193,19 +189,21 @@ def build(out: Path, space_id: str, cache_dir: Path | None, extra_markers: tuple
         raise
     references = sum(1 for f in files if f.startswith("experiments/references/") and f.endswith(".yaml"))
     commit = _commit()
-    (out / "Dockerfile").write_text(dockerfile(host), encoding="utf-8", newline="\n")
-    (out / "README.md").write_text(card(space_id, host, commit, energies, studies, references), encoding="utf-8", newline="\n")
+    (out / "Dockerfile").write_text(dockerfile(host, prewarm=cache_dir is not None), encoding="utf-8", newline="\n")
+    (out / "README.md").write_text(card(space_id, host, commit, energies, references), encoding="utf-8", newline="\n")
+    if cache_dir is not None:
+        shutil.copyfile(Path(__file__).with_name("prewarm.py"), out / "prewarm.py")
     (out / "SOURCE_COMMIT").write_text(commit + "\n", encoding="utf-8")
     size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
     return {"space_id": space_id, "host": host, "commit": commit, "files": sum(1 for f in out.rglob("*") if f.is_file()), "bytes": size,
-            "energies": energies, "studies": studies, "references": references}
+            "energies": energies, "references": references}
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Assemble a Hugging Face Space folder for Mission control.")
     parser.add_argument("outdir", type=Path, help="a new, empty folder")
     parser.add_argument("--space-id", required=True, help="owner/name of the Space, e.g. Hastika06/substrate-mission-control")
-    parser.add_argument("--cache-dir", type=Path, help="the folder holding qc.sqlite3 and gui/ (default: none, so only the model experiments work)")
+    parser.add_argument("--cache-dir", type=Path, help="the folder holding qc.sqlite3 (default: none, so only the model experiments work and there is no study to compute)")
     parser.add_argument("--also-refuse", action="append", default=[], metavar="TEXT", help="another string that must not appear in anything shipped (repeatable)")
     args = parser.parse_args(argv)
     try:

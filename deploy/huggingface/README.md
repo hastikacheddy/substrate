@@ -22,9 +22,12 @@ python deploy/huggingface/upload_space.py ../space --space-id Hastika06/substrat
   `--bind 0.0.0.0 --allow-host <the Space's own host name> --max-jobs 2`: it listens beyond the machine only because it was told the one name it answers to (no wildcards, and it refuses to
   start without one), the Host and Origin checks stay on for that name, and at most two jobs run at once (a third gets HTTP 429, "the server is busy"). `SUBSTRATE_MAX_ENSEMBLE=200` keeps an
   ensemble small. The container runs as an ordinary user, with no secrets in it.
-- **The stored energies, not new chemistry.** PySCF is not installed. The real-chemistry experiments read the energy cache (`qc.sqlite3`, thousands of PySCF energies, numbers only) and the saved
-  transfer-study results from `--cache-dir`; the builder copies them with SQLite's backup API and **stops if any value contains a user name, a home or drive path or a host name**, leaving nothing
-  behind. Anything that needs an energy that is not stored fails with a message saying so.
+- **The stored energies, not new chemistry.** PySCF is not installed. The real-chemistry experiments read the energy cache (`qc.sqlite3`, thousands of PySCF energies, numbers only) from
+  `--cache-dir`; the builder copies it with SQLite's backup API and **stops if any value contains a user name, a home or drive path or a host name**, leaving nothing behind. Anything that
+  needs an energy that is not stored fails with a message saying so (the "downstream rates" panel, which runs the real chain at new distances, is one).
+- **The transfer study is computed in the image.** Saved studies are not copied from your machine: a study is keyed to the exact bytes of the reference files it was made from, so one made
+  here goes stale as soon as any of them changes (all seven of the author's did). `prewarm.py` runs the full study from the stored energies while the image is built, which also makes
+  the build fail, rather than the Space, if an energy is missing. With no `--cache-dir` there is nothing to compute it from, so the step is left out.
 - **License unspecified.** The card says `license: other`, matching GitHub, where none has been chosen.
 
 ## Things to know
