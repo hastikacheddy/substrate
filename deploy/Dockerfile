@@ -2,7 +2,7 @@
 # The control plane: the API and the workers are the same image with different commands.
 # Pin the base image by digest in a release build (Dependabot's docker ecosystem keeps the digest current once it is there):
 #   FROM python:3.13-slim-bookworm@sha256:<digest>
-FROM python:3.13-slim-bookworm AS build
+FROM python:3.14-slim-bookworm AS build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /src
 COPY pyproject.toml README.md requirements-lock.txt requirements-platform-lock.txt ./
@@ -10,7 +10,7 @@ COPY src ./src
 # Every wheel is built here, with the versions pinned in the lock files used as constraints, so the final image installs from this directory only.
 RUN pip wheel --wheel-dir /wheels -c requirements-platform-lock.txt ".[platform,postgres,otlp,redis,s3]"
 
-FROM python:3.13-slim-bookworm
+FROM python:3.14-slim-bookworm
 LABEL org.opencontainers.image.title="substrate control plane" \
       org.opencontainers.image.source="https://github.com/hastikacheddy/substrate" \
       org.opencontainers.image.licenses="NOASSERTION"
