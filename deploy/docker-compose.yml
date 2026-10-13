@@ -162,6 +162,7 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_SECURITY_COOKIE_SECURE: "false"       # plain HTTP on loopback; set true behind a TLS proxy
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"   # Grafana 13 installs its bundled data-source plugins in the background at start, which cannot work on a read-only root filesystem and left the Prometheus data source unregistered
     secrets: [grafana_admin_password]
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
