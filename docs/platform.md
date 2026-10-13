@@ -126,7 +126,8 @@ file means the line was measured in the laboratory; the record keeps the tag pos
 format code. A line that does not have the layout is an error naming its number, and so is a file of another species. The client refuses anything over 5 MB, which is about 62,000 lines, so the
 largest species cannot be fetched. A source can change its format without notice; the field checks are what would notice, and the opt-in live tests say whether it has.
 
-The client is the only code in the package that opens a connection, and it is strict: hosts on an allowlist only; HTTPS (plain HTTP to loopback only, and only when a test or
+The client is the only code that fetches outside data on a user's behalf (the database, Redis, an S3 store, the OpenTelemetry collector and, for a deployment that supplies a token, IBM's quantum service are connections the
+deployment configures, not ones a request can aim), and it is strict: hosts on an allowlist only; HTTPS (plain HTTP to loopback only, and only when a test or
 a local mirror enables it); no credentials, fragment or unusual port in the URL; the host is resolved **once**, any private, loopback, link-local (this covers 169.254.169.254, the
 cloud metadata service), multicast, reserved, unspecified or shared-address-space address is refused, and the connection goes to the vetted address itself, so a DNS answer that
 changes between the check and the connection cannot redirect it; redirects are followed only within the allowlist, re-checked at every hop, at most three; only status 200 and a
@@ -197,7 +198,7 @@ accounted for in [validation.md](validation.md); the Redis notifier, the JPL ada
 key handling; the queue's state machine, including concurrent workers racing for one task (repeated runs); the six-axis classification; reproduction (a 1e-3 change detected, 1e-9 tolerated); artifact
 integrity and the media-type allowlist; process isolation (a deadline kill, a scrubbed environment, a crash in the child); the fabric client against local servers, including redirects, oversize bodies and
 a hostile DNS answer; the adapters against fixtures; the quantum backends against `eigh`; the metrics, the dashboards and alerts against the metrics the code emits; the deployment files' structure and
-security properties. CI (GitHub Actions, Linux) runs the suite on Python 3.10, 3.11 and 3.12 from the locked dependencies, the core alone, the Qiskit providers, a container build and start, a
+security properties. CI (GitHub Actions, Linux) runs the suite on Python 3.10, 3.11, 3.12 and 3.13 from the locked dependencies, the core alone, the Qiskit providers, a container build and start, a
 vulnerability audit of every lock file, and CodeQL; the Linux-only resource limits are among the tests it runs.
 
 **Run against real systems on 12 October 2026**, on one Windows 11 machine (Docker Desktop, Docker Engine 25.0.3, Compose 2.24.6; minikube 1.33.1 with Kubernetes 1.30 and Calico), with what each run found:
@@ -245,10 +246,14 @@ keeps the data in a version-specific directory below `/var/lib/postgresql`), so 
 Kubernetes manifests and the Helm chart still use PostgreSQL 16, unchanged and tested that way.** With all of them together on one stack (PostgreSQL 18.6, Grafana 13.2.3, Tempo 3.1.0, collector 0.162.0, Prometheus
 v3.15.0): three workflows ran and each reproduced, the Prometheus data source and target worked, 11 of the dashboard's 14 queries returned data, and a run's seven spans came back from Tempo through Grafana.
 `python` 3.14 was **not** merged: pip finds no 3.14 wheel for the locked numpy 2.2.6, downloads its source and tries to compile it, and the slim image has no compiler, so the image does not build (the same lock
-builds on 3.13, which no pull request proposes). numpy, scipy and pyyaml were merged as changes to the lock only, to numpy 2.2.6, scipy 1.15.3 and PyYAML 6.0.3: the pull requests also raised the minimum versions
+builds on 3.13, which the image uses now: see below). numpy, scipy and pyyaml were merged as changes to the lock only, to numpy 2.2.6, scipy 1.15.3 and PyYAML 6.0.3: the pull requests also raised the minimum versions
 in `pyproject.toml`, which would exclude every user of numpy 1.x and which no test ever exercised (the tests run on the locked pins), so those minimums are as they were. The whole suite passed on Python 3.10, 3.11 and 3.12
 on the new pins (1,798, 1,862 and 1,799 passed, the 3.11 run including the Qiskit tests) and pip-audit finds nothing in any lock file. **The studies and benchmarks reported in these documents were produced on
 numpy 1.26.4, scipy 1.14.0 and PyYAML 6.0.1 and were not re-run on the new pins.**
+
+**The container image runs Python 3.13.** The base image moved from `python:3.12-slim-bookworm` to `3.13-slim-bookworm` (the Python 3.14 pull request cannot work, above). The image contains Python 3.13.16 and exactly
+the locked packages. The whole suite passed on a host Python 3.13 on the locked dependencies (1,799 passed, 22 skipped, the same as on 3.12), so 3.13 is in CI's test matrix now: the interpreter the image ships is one
+the tests run on. A full stack of containers on the new image ran a workflow, and its reproduction, end to end.
 
 Not verified, and not claimed:
 

@@ -4,8 +4,9 @@
 
 **Propagate scientific models across scales, through one representation, with every hop documented and validated.**
 
-![python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-1764-brightgreen)
+![ci](https://github.com/hastikacheddy/substrate/actions/workflows/ci.yml/badge.svg)
+![python](https://img.shields.io/badge/python-3.10%20to%203.13-3776ab?logo=python&logoColor=white)
+![tests](https://img.shields.io/badge/tests-1956-brightgreen)
 ![status](https://img.shields.io/badge/status-research%20prototype-orange)
 ![quantum chemistry](https://img.shields.io/badge/quantum%20chemistry-PySCF-6f42c1)
 
@@ -24,8 +25,104 @@ the hop, the pipeline stops with a reason instead of inventing a result.
 On top of that sits a quantitative study built on **real quantum chemistry** (PySCF, from Hartree–Fock to CCSD(T)): can the parameters of a cheap
 valence-bond model, fitted to one molecule at one level of theory, say anything about another? They mostly cannot, and the repository measures why.
 
+Around the core is a **control plane** that runs it as a service: an API with tenants, roles and quotas, a task queue and sandboxed workers, content-addressed artifacts, reproducibility checks, live data sources,
+quantum-solver providers, monitoring, and Docker, Kubernetes and Helm deployment. [The overview below](#the-whole-system-at-a-glance) shows how all of it connects.
+
 > **Status: a research prototype.** The software is carefully tested and its statements about itself are measured. The chemistry is a *testbed*
 > built on rigid, gas-phase scans, not a prediction of any real system's kinetics. [Read the limits](docs/limits.md) before you quote a number.
+
+## The whole system at a glance
+
+`substrate` is two things that can be used apart: a **scientific core** (a Python library and command line that follows one process through the scales) and, around it, a **control plane**
+that runs the same core as a service for many people. Everything else in the picture supports one of the two.
+
+```mermaid
+flowchart TB
+    subgraph USERS["Who uses it"]
+        CLI["Command line"]
+        GUI["Mission control<br/>local web GUI"]
+        CLIENT["API clients<br/>key, behind a TLS proxy"]
+    end
+
+    subgraph PLAT["Control plane, for more than one person (extra: platform)"]
+        API["API<br/>FastAPI, roles, quotas,<br/>data fabric"]
+        DB[("Registry database<br/>SQLite or PostgreSQL:<br/>runs, task queue, audit")]
+        WORK["Workers<br/>one sandboxed<br/>process per step"]
+        ART[("Artifact store<br/>directory or S3,<br/>content-addressed")]
+        REDIS(["Redis<br/>wake-up, optional"])
+        GATE["Quantum gateway<br/>policy and quota"]
+    end
+
+    subgraph CORE["Scientific core, a library that works on its own"]
+        PIPE["Pipeline<br/>engines, translators,<br/>one validated IR"]
+        BACK["Solver backends<br/>SciPy or quantum"]
+        CAL["Calibration and<br/>transfer study"]
+        QC["PySCF bridge<br/>with an energy cache"]
+    end
+
+    subgraph SIDE1["Outside the system"]
+        DATA["Public data<br/>PubChem, RCSB,<br/>NASA JPL, NIST"]
+        QPROV["Quantum providers (extra: qiskit)<br/>simulator, Qiskit Aer,<br/>emulated IBM devices,<br/>IBM hardware: never run"]
+    end
+
+    subgraph OBS["Monitoring"]
+        PROM["Prometheus"]
+        TRACES["OpenTelemetry<br/>collector and Tempo"]
+        GRAF["Grafana"]
+    end
+
+    subgraph SHIP["How it is built and run"]
+        CI["GitHub Actions<br/>tests, audit, SBOM,<br/>CodeQL, Dependabot"]
+        IMG["Container image<br/>locked wheels, non-root"]
+        RUNNERS["Docker Compose<br/>or Kubernetes (Helm)"]
+    end
+
+    CLI --> CORE
+    GUI --> CORE
+    CLI -->|"platform ..."| PLAT
+    CLIENT -->|"HTTPS"| API
+
+    API --> DB
+    WORK -->|"claims tasks"| DB
+    API -.-> REDIS
+    REDIS -.-> WORK
+    API --> ART
+    WORK --> ART
+    WORK -->|"quantum steps ask first"| GATE
+    WORK -->|"each step runs the core"| PIPE
+
+    PIPE --> BACK
+    PIPE --> QC
+    CAL --> PIPE
+    QC --> CAL
+    BACK -->|"quantum backend"| QPROV
+    GATE -.->|"allows a provider"| QPROV
+    API -->|"ingest"| DATA
+
+    API -->|"/metrics"| PROM
+    WORK -->|"spans"| TRACES
+    PROM --> GRAF
+    TRACES --> GRAF
+
+    CI --> IMG
+    IMG --> RUNNERS
+    RUNNERS -.->|"runs"| PLAT
+    RUNNERS -.->|"runs"| OBS
+```
+
+How to read it. Solid arrows are calls or data flow; dotted ones are optional or indirect (Redis only tells idle workers to look sooner, the gateway only gives permission, "runs" is where something is deployed).
+
+- **On its own**, the core needs only NumPy, SciPy and PyYAML. The command line and the GUI call the pipeline directly; real quantum chemistry comes from PySCF through an energy cache, and the calibration and transfer
+  studies are built on top.
+- **As a service**, the API accepts a run and the database holds the task queue; workers (one sandboxed process per step) claim tasks, run the same pipeline and store what it produces as content-addressed artifacts. A
+  run ends with a six-axis status, and `reproduce` runs it again and compares.
+- **Quantum solvers** are named in an experiment's `backend:` block. The gateway checks the provider policy and the user's quota first. A simulator, Qiskit's Aer and Qiskit's emulations of IBM devices have been run;
+  IBM's hardware has not, because no credentials were available.
+- **Outside data** (PubChem, RCSB, NASA JPL's spectral lines, the bundled NIST set) reaches the platform only through the data fabric's allow-listed HTTPS client, and is stored as versioned, checksummed datasets.
+- **Monitoring and deployment** are configuration around the code, not part of it: Prometheus scrapes the API, task spans go through an OpenTelemetry collector to Tempo, and Grafana draws both. One locked, non-root
+  container image runs under Docker Compose (one host) or Kubernetes (manifests or a Helm chart), and GitHub Actions tests, audits and builds it.
+
+What was run for real, and what was not, is stated in [docs/platform.md](docs/platform.md); what is defended, and what is not, in [SECURITY.md](SECURITY.md).
 
 ## Highlights
 
@@ -115,6 +212,34 @@ experiment:
   propagation: [biological]
 ```
 
+### As a service
+
+The control plane is optional extras on top of the same install:
+
+| Extra | What it adds |
+|---|---|
+| `dev` | pytest and httpx, to run the tests |
+| `platform` | the control plane: API, registry, queue, workers, artifacts, data fabric, metrics |
+| `postgres` | the PostgreSQL driver (SQLite needs none) |
+| `otlp` | trace export to an OpenTelemetry collector |
+| `redis` | the workers' Redis wake-up (without it they poll the database) |
+| `s3` | an S3-compatible artifact store |
+| `qiskit` | the Qiskit quantum providers (Aer, emulated IBM devices, IBM's devices) |
+| `plots` | the benchmark figure |
+
+```bash
+# On one machine: PostgreSQL, Redis, the API, two workers, a collector, Tempo, Prometheus and Grafana, all on loopback.
+# Make the secret files first (deploy/secrets/README.md), then:
+docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml run --rm api platform init --tenant lab    # prints the first administrator's key once
+python deploy/verify_networks.py        # on Docker 25.0 with Compose 2.24, checks that no container silently lost a network
+
+# On a cluster (create the namespace and the secret first: deploy/k8s/README.md)
+kubectl apply -k deploy/k8s             # or: helm install substrate deploy/helm/substrate -n substrate
+```
+
+[docs/platform.md](docs/platform.md) has the API, the status axes, reproduction, the data fabric, the quantum providers and an account of what was run against real systems.
+
 ### Real quantum chemistry
 
 Real energies need [PySCF](https://pyscf.org), which has no Windows build. On Linux or macOS `pip install pyscf` is enough. On Windows, `scripts/setup_qc_env.sh` creates an
@@ -149,7 +274,7 @@ version and worker; `cache verify [--delete]` and `cache purge --corrupt | --unv
 
 ## Architecture
 
-Two views. The **high-level** diagrams show what the pieces are and how the scales connect. The **low-level** diagrams show what happens inside a run, the
+The whole system, with the control plane, the data sources, the quantum providers, monitoring and deployment, is in [the overview at the top](#the-whole-system-at-a-glance); the diagrams below zoom into the scientific core. Two views. The **high-level** diagrams show what the pieces are and how the scales connect. The **low-level** diagrams show what happens inside a run, the
 core types, the quantum-chemistry bridge, the model itself, the studies built on it, and the GUI. File names are under `src/substrate/`; the text is in
 [docs/architecture.md](docs/architecture.md) and [docs/science.md](docs/science.md).
 
@@ -602,16 +727,16 @@ src/substrate/
   calibration.py  transfer.py  diatomics.py     fit the model to a surface; cross-prediction and learning curves; free X–H Morse curves
   datasets.py  data/  fragments.py              measured reference values (NIST proton affinities and acidities) with their provenance; a complex taken apart into its four fragments
   limits.py  safeload.py                        resource limits (from the environment) and the loader that does not trust an experiment file
-  qpu.py                                        a small statevector simulator, the quantum solver backend, and the policy that bounds a quantum job
-  control/                                      the control plane: API, registry, roles and quotas, queue, workers, sandbox, artifacts, data fabric, metrics (the `platform` extra)
+  qpu.py  qpu_qiskit.py                         a small statevector simulator, the quantum solver backend, and the policy that bounds a quantum job; Qiskit providers (the `qiskit` extra)
+  control/                                      the control plane: API, registry, roles and quotas, queue, workers, sandbox, artifacts, data fabric, a Redis wake-up, metrics (the `platform` extra)
   molecules.py                                  templates: Zundel, ammonium dimer, bifluoride, water–ammonia, methanol–water, ...
   gui/                                          the local web GUI: standard-library server, plain HTML/JS, no build step, no external requests
-deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, a Helm chart, Prometheus, Grafana and OpenTelemetry configuration
+deploy/                                         Dockerfile, Docker Compose, Kubernetes manifests, a Helm chart, Prometheus, Grafana, Tempo and OpenTelemetry configuration, verify_networks.py
 experiments/                                    runnable experiment files; references/ (24 real surfaces) and benchmarks/ (8 bifluoride surfaces)
 examples/                                       the scripts in the table above
 tests/                                          1,956 tests
 docs/                                           architecture, science, findings, validation, limits, extending, images
-.github/                                        CI (tests, dependency audit, SBOM, container build), CodeQL, Dependabot; the requirements-*lock.txt files pin the versions
+.github/                                        CI (tests on Python 3.10 to 3.13, the Qiskit providers, dependency audit, SBOM, container build), CodeQL, Dependabot; the requirements-*lock.txt files pin the versions
 SECURITY.md                                     the threat model, what is defended, what is not, how to report a vulnerability
 ```
 
@@ -626,6 +751,8 @@ SECURITY.md                                     the threat model, what is defend
 | [docs/platform.md](docs/platform.md) | The control plane: runs, status axes, reproduction, data fabric, deployment, and what has not been verified |
 | [docs/validation.md](docs/validation.md) | How each part is tested, and the bugs the tests found |
 | [docs/extending.md](docs/extending.md) | Adding the next scale or model |
+| [SECURITY.md](SECURITY.md) | The threat model, what is defended and what is not, how to report a vulnerability |
+| [deploy/k8s/README.md](deploy/k8s/README.md), [deploy/secrets/README.md](deploy/secrets/README.md) | Installing on Kubernetes; making the secret files |
 
 ## Development
 
@@ -637,7 +764,9 @@ pytest -m "not qc"                 # the 1,883 that do not
 
 ## Credits and license
 
-Quantum chemistry is computed with [PySCF](https://pyscf.org); diatomic spectroscopic constants are from the [NIST Chemistry WebBook](https://webbook.nist.gov/chemistry/).
-Numerics use NumPy and SciPy.
+Quantum chemistry is computed with [PySCF](https://pyscf.org); diatomic spectroscopic constants and proton affinities are from the [NIST Chemistry WebBook](https://webbook.nist.gov/chemistry/).
+Numerics use NumPy and SciPy. The control plane is built on FastAPI, SQLAlchemy, PostgreSQL, Redis, Prometheus, Grafana, Grafana Tempo and OpenTelemetry, and the quantum providers on Qiskit.
+Data come from [PubChem](https://pubchem.ncbi.nlm.nih.gov), the [RCSB Protein Data Bank](https://www.rcsb.org) and NASA JPL's Submillimeter, Millimeter, and Microwave Spectral Line Catalog
+(H. M. Pickett, R. L. Poynter, E. A. Cohen, M. L. Delitsky, J. C. Pearson and H. S. P. Muller, J. Quant. Spectrosc. Radiat. Transfer 60, 883-890, 1998; [spec.jpl.nasa.gov](https://spec.jpl.nasa.gov)).
 
 No license has been chosen yet, so the default copyright applies (all rights reserved). Open an issue if you would like to use or contribute to the project.
