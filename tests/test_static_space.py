@@ -246,6 +246,33 @@ def static_folder(tmp_path):
     return f
 
 
+class OldClientApi:
+    """huggingface_hub before 0.24 (0.23.4 is installed here): no update_repo_settings, only update_repo_visibility."""
+
+    def __init__(self):
+        self.calls = []
+
+    def whoami(self):
+        return {"name": "Hastika06", "orgs": []}
+
+    def create_repo(self, repo_id, **kw):
+        self.calls.append(("create_repo", repo_id, kw))
+
+    def upload_folder(self, **kw):
+        self.calls.append(("upload_folder", kw))
+
+    def update_repo_visibility(self, **kw):
+        self.calls.append(("update_repo_visibility", kw))
+
+
+def test_public_works_with_a_client_that_only_has_the_older_visibility_call(static_folder, capsys):
+    api = OldClientApi()
+    assert upload.main([str(static_folder), "--space-id", SPACE, "--public"], api=api) == 0
+    assert api.calls[0][2]["private"] is False
+    assert api.calls[-1] == ("update_repo_visibility", {"repo_id": SPACE, "private": False, "repo_type": "space"})
+    assert "public" in capsys.readouterr().out
+
+
 def test_a_static_space_is_created_private_as_a_static_space(static_folder, capsys):
     api = FakeApi()
     assert upload.main([str(static_folder), "--space-id", SPACE], api=api) == 0

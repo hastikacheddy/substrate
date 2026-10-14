@@ -84,7 +84,10 @@ def main(argv=None, api=None) -> int:
         api.create_repo(args.space_id, repo_type="space", space_sdk=sdk, private=not args.public, exist_ok=True)
         api.upload_folder(folder_path=str(args.folder), repo_id=args.space_id, repo_type="space", commit_message=f"Mission control demo, {sdk} (source commit {commit})")
         if args.public:
-            api.update_repo_settings(repo_id=args.space_id, repo_type="space", private=False)
+            if hasattr(api, "update_repo_settings"):
+                api.update_repo_settings(repo_id=args.space_id, repo_type="space", private=False)
+            else:                                                      # huggingface_hub before 0.24 (0.23.4 was tried) has only the older call
+                api.update_repo_visibility(repo_id=args.space_id, private=False, repo_type="space")
     except Exception as error:                                         # noqa: BLE001 (a refusal from the Hub is an answer, not a crash: show what it said)
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)
