@@ -37,7 +37,7 @@ otlp = ["opentelemetry-exporter-otlp-proto-http>=1.24"]   # workers send traces 
 s3 = ["boto3>=1.34"]                      # for an S3-compatible artifact store (MinIO, AWS)
 redis = ["redis>=5"]                      # workers wake on a Redis notification instead of polling the database every half second
 qiskit = ["qiskit>=1.2", "qiskit-aer>=0.15", "qiskit-ibm-runtime>=0.30"]   # quantum providers: Aer, emulated IBM devices, and IBM's devices (see substrate.qpu_qiskit)
-plots = ["matplotlib>=3.7"]          # only for the benchmark figure in examples/benchmark_bifluoride.py
+plots = ["matplotlib>=3.10.9"]          # only for the benchmark figure in examples/benchmark_bifluoride.py
 
 [project.scripts]
 substrate = "substrate.cli:main"
