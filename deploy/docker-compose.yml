@@ -67,7 +67,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7.4-alpine
+    image: redis:8.0-alpine
     <<: *hardened
     user: "999:999"
     command: ["redis-server", "/run/secrets/redis_conf", "--save", "", "--appendonly", "no"]       # the password is in the secret file; nothing is persisted (a wake-up holds no data)
