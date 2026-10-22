@@ -151,7 +151,7 @@ services:
     networks: [monitoring]
 
   grafana:
-    image: grafana/grafana:13.2.3
+    image: grafana/grafana:13.2.4
     <<: *hardened
     user: "472:472"
     ports:
